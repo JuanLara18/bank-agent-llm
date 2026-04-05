@@ -46,7 +46,7 @@ def run(
     enrich: bool = typer.Option(True, help="Categorise transactions via Ollama."),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL", help="Logging verbosity."),
 ) -> None:
-    """Run the full pipeline: fetch → parse → enrich → store."""
+    """Run the full pipeline: fetch, parse, enrich, store."""
     _setup_logging(log_level)
     from bank_agent_llm.pipeline import Pipeline
 
@@ -314,12 +314,50 @@ def status(
 
 
 @app.command()
+def dashboard(
+    port: int = typer.Option(8501, help="Port for the Streamlit server."),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
+    log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
+) -> None:
+    """Launch the interactive web dashboard (Streamlit).
+
+    Opens a browser tab at http://localhost:<port> with charts and filters.
+    Press Ctrl+C to stop.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path as P
+
+    _setup_logging(log_level)
+
+    app_path = P(__file__).parent / "dashboard" / "app.py"
+    cmd = [
+        sys.executable, "-m", "streamlit", "run",
+        str(app_path),
+        "--server.port", str(port),
+        "--server.headless", "false",
+        "--browser.gatherUsageStats", "false",
+    ]
+    console.print(f"[green]Abriendo dashboard en http://localhost:{port}[/green]")
+    console.print("[dim]Ctrl+C para detener.[/dim]")
+    try:
+        subprocess.run(cmd, check=True)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dashboard detenido.[/yellow]")
+    except FileNotFoundError:
+        err_console.print(
+            "[red]streamlit no encontrado. Instala con: pip install streamlit[/red]"
+        )
+        raise typer.Exit(1)
+
+
+@app.command()
 def chat(
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
     """Start an interactive natural-language chat session with your data."""
     _setup_logging(log_level)
-    err_console.print("[yellow]Not yet implemented (M7).[/yellow]")
+    err_console.print("[yellow]Not yet implemented (M8).[/yellow]")
     raise typer.Exit(1)
 
 

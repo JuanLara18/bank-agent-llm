@@ -44,6 +44,9 @@ dependencies = [
     "google-auth>=2.29",
     "google-auth-oauthlib>=1.2",
     "google-api-python-client>=2.130",
+    # Web dashboard
+    "streamlit>=1.35",
+    "plotly>=5.20",
 ]
 
 [project.optional-dependencies]
