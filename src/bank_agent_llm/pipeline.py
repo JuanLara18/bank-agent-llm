@@ -192,9 +192,23 @@ class Pipeline:
         """Parse any unprocessed statement files in the raw data directory."""
         raise NotImplementedError("parse() not yet implemented — see docs/roadmap.md (M3)")
 
-    def enrich(self) -> None:
-        """Categorise uncategorised transactions using the local Ollama model."""
-        raise NotImplementedError("enrich() not yet implemented — see docs/roadmap.md (M4)")
+    def enrich(self, *, force: bool = False) -> "EnrichResult":  # type: ignore[name-defined]
+        """Tag all pending transactions using rules engine and optional Ollama.
+
+        Args:
+            force: Re-tag already-tagged transactions (skips manual ones).
+
+        Returns:
+            EnrichResult with counts per tagging source.
+        """
+        from bank_agent_llm.enrichment.enricher import EnrichResult, TransactionEnricher
+        from bank_agent_llm.storage.database import get_session
+
+        self._init_db()
+        enricher = TransactionEnricher(self._get_settings())
+
+        with get_session() as session:
+            return enricher.enrich(session, force=force)
 
     def purge(self, before: str) -> None:
         """Delete all transactions with a date before the given value.
