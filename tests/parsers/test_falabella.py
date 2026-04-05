@@ -84,5 +84,23 @@ def test_parse_row_position_set() -> None:
     assert tx.position_in_statement == 5
 
 
+def test_parse_row_double_encoded_payment() -> None:
+    """Double-encoded amount like --$$994444..771144,,9944 must parse as CREDIT."""
+    tokens = ["27/02/2026", "PAGO", "TARJETA", "CMR", "TT", "--$$994444..771144,,9944"]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.direction == TransactionDirection.CREDIT
+    assert tx.amount == Decimal("944714.94")
+
+
+def test_parse_row_double_encoded_debit() -> None:
+    """Double-encoded positive amount like $$22..999900,,0000 must parse as DEBIT."""
+    tokens = ["18/03/2026", "COBRO", "SEGURO", "VIDA", "DEUDOR", "TT", "$$22..999900,,0000"]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.direction == TransactionDirection.DEBIT
+    assert tx.amount == Decimal("2990.00")
+
+
 def test_bank_name() -> None:
     assert FalabellaParser().bank_name == "Falabella CMR"

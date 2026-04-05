@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from bank_agent_llm.parsers.bancolombia import BancolombiaParser, _parse_row
+from bank_agent_llm.parsers.bancolombia import BancolombiaParser, _parse_row, _untriple, _extract_card_digits
 from bank_agent_llm.parsers.base import TransactionDirection
 
 
@@ -85,6 +85,55 @@ def test_parse_row_position_set() -> None:
     tx = _parse_row(tokens, "file.pdf", 7)
     assert tx is not None
     assert tx.position_in_statement == 7
+
+
+def test_parse_row_alphanumeric_auth_code() -> None:
+    """Auth codes like C07817 or R02013 must be recognized as auth prefixes."""
+    tokens = ["C07817", "27/02/2026", "ABONO", "WOMPI/PSE", "$", "-2.000.000,00"]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.direction == TransactionDirection.CREDIT
+    assert tx.amount == Decimal("2000000.00")
+
+
+def test_parse_row_r_prefixed_auth_code() -> None:
+    tokens = ["R02013", "24/02/2026", "CURSOR", "USAGE", "$", "103,72"]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.raw_description == "CURSOR USAGE"
+
+
+# ── _untriple ─────────────────────────────────────────────────────────────────
+
+def test_untriple_valid() -> None:
+    assert _untriple("111333333222") == "1332"
+
+
+def test_untriple_non_uniform_group_returns_empty() -> None:
+    assert _untriple("112333333222") == ""
+
+
+def test_untriple_odd_length_returns_empty() -> None:
+    assert _untriple("1133") == ""
+
+
+# ── _extract_card_digits ──────────────────────────────────────────────────────
+
+def test_extract_card_digits_from_triple_encoded_token() -> None:
+    tokens = ["***************************111333333222"]
+    result = _extract_card_digits(tokens)
+    assert result == "1332"
+
+
+def test_extract_card_digits_mastercard() -> None:
+    tokens = ["***000000000000000666777444555"]
+    result = _extract_card_digits(tokens)
+    assert result == "6745"
+
+
+def test_extract_card_digits_no_match() -> None:
+    tokens = ["NIT:", "890.903.938-8"]
+    assert _extract_card_digits(tokens) is None
 
 
 def test_bank_name() -> None:
