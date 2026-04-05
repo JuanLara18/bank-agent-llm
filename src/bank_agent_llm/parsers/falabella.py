@@ -4,14 +4,17 @@ Supports password-protected PDFs from Banco Falabella Colombia.
 
 Signature: "Tarjeta de Crédito CMR" or "Banco Falabella" in first-page text.
 
-PDF encoding quirk: styled header text has each character doubled
-  (TTaarrjjeettaa → Tarjeta) but transaction data rows are normal.
+PDF encoding: styled header text has each character doubled
+  (TTaarrjjeettaa → Tarjeta), but transaction data rows are normal.
 
 Row format (word-level extraction):
     DD/MM/YYYY  description...  TT  $amount  N  de  M  rate%  $cuota  $saldo
 
-Payments appear with doubled minus sign in the amount field:
-    --$944.714,94 → -944714.94 → CREDIT direction
+Payments and fees have double-encoded amounts:
+    --$$994444..771144,,9944 → (dedouble) → -$944.714,94 → CREDIT direction
+
+Important: Falabella PDFs often contain a CUENTA DE AHORROS section after
+the credit card pages. This parser stops when it detects that section.
 """
 
 from __future__ import annotations
@@ -32,18 +35,21 @@ from bank_agent_llm.parsers._utils import (
 
 _BANK_NAME = "Falabella CMR"
 
-# Signatures that may appear in raw (possibly doubled) first-page text
 _SIGNATURES = ("Tarjeta de Crédito CMR", "Banco Falabella", "BANCO FALABELLA", "CMR")
 
-# Card number pattern in header (e.g. "4213 **** **** 1234" or "BFCO...")
-_CARD_RE = re.compile(r"\b(\d{4}[\s*]+\d{4}[\s*]+\d{4}[\s*]+\d{4})\b")
-_BFCO_RE = re.compile(r"BFCO(\d+)", re.IGNORECASE)
-
-# "TT" token separates description from amount section (doubled "T" = transaction type)
+# "TT" token separates description from amount section (doubled transaction-type marker)
 _TT_TOKEN = "TT"
 
-# Amount token pattern (may start with -- or $ or both)
-_AMOUNT_RE = re.compile(r"^-{0,2}\$?-?[\d.,]+$")
+# Savings account section header — stop parsing when encountered
+_SAVINGS_HEADER = "CUENTA DE AHORROS"
+
+# Amount token (may be double-encoded): starts with optional -- or $$ or --$$
+_AMOUNT_RE = re.compile(r"^-{0,4}\${0,2}-?[\d.,]+$")
+
+# Partial card number in header: "CCMMRR::####" (CMR: followed by 4 digits)
+_CMR_CARD_RE = re.compile(r"CCMMRR::(\d{4})", re.IGNORECASE)
+# Also look for plain 4-digit card suffix in any token
+_FOUR_DIGITS_RE = re.compile(r"\b(\d{4})\b")
 
 
 class FalabellaParser(BankParser):
@@ -71,21 +77,20 @@ class FalabellaParser(BankParser):
                     words = page.extract_words(x_tolerance=3, y_tolerance=3)
                     rows = group_words_by_row(words, y_tolerance=3.0)
 
+                    # Stop at savings account section (different document embedded in same PDF)
+                    page_text = " ".join(" ".join(row_tokens(r)) for r in rows)
+                    if _SAVINGS_HEADER in page_text:
+                        break
+
                     for row in rows:
                         tokens = row_tokens(row)
                         line = " ".join(tokens)
 
-                        # Try to extract card number from header area
+                        # Extract card number from "CCMMRR::####" pattern in header
                         if account_number is None:
-                            m = _CARD_RE.search(line)
+                            m = _CMR_CARD_RE.search(line)
                             if m:
-                                # Keep last 4 digits only
-                                digits = re.sub(r"[^\d]", "", m.group(1))
-                                account_number = digits[-4:]
-                            else:
-                                m2 = _BFCO_RE.search(line)
-                                if m2:
-                                    account_number = m2.group(1)[-4:]
+                                account_number = m.group(1)
 
                         tx = _parse_row(tokens, str(file_path), len(transactions))
                         if tx is not None:
@@ -112,7 +117,7 @@ def _parse_row(
 
     tx_date = parse_date(tokens[0])
 
-    # Find "TT" separator (transaction type marker, comes from doubled "T")
+    # Find "TT" separator
     tt_idx = None
     for i in range(1, len(tokens)):
         if tokens[i] == _TT_TOKEN:
@@ -124,18 +129,17 @@ def _parse_row(
 
     # Description is everything between date and "TT"
     description_tokens = tokens[1:tt_idx]
-    # Falabella sometimes encodes description tokens with doubled chars — clean them
     description = " ".join(_maybe_dedouble(t) for t in description_tokens).strip()
 
     if not description:
         return None
 
-    # Amount comes after "TT"
+    # Amount follows "TT" — may be double-encoded
     amount_idx = tt_idx + 1
     if amount_idx >= len(tokens):
         return None
 
-    raw_amount = tokens[amount_idx]
+    raw_amount = _maybe_dedouble(tokens[amount_idx])
     if not _AMOUNT_RE.match(raw_amount):
         return None
 
