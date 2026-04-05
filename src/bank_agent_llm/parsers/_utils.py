@@ -18,38 +18,39 @@ _DOUBLE_RE = re.compile(r"(.)\1")
 def open_pdf(file_path: Path, passwords: list[str] | None = None):
     """Open a pdfplumber PDF, trying passwords if needed.
 
+    Tries without a password first, then each password in order.
+    pdfplumber raises on the open() call itself for encrypted PDFs,
+    so both the open and the page read are wrapped.
+
     Args:
         file_path: Path to the PDF.
         passwords: Passwords to try (in order) if the PDF is encrypted.
 
     Returns:
-        An open pdfplumber.PDF context (caller must use as context manager or close).
+        An open pdfplumber.PDF context (caller must close it).
 
     Raises:
         RuntimeError: If the PDF is encrypted and no password works.
     """
     import pdfplumber
 
-    pdf = pdfplumber.open(str(file_path))
-    if not pdf.pages:
-        return pdf
-
-    # Try to access first page — if encrypted, it will raise
-    try:
-        _ = pdf.pages[0].extract_text()
-        return pdf
-    except Exception:  # noqa: BLE001
-        pdf.close()
-
-    for pw in (passwords or []):
+    for pw in [None, *(passwords or [])]:
+        pdf = None
         try:
-            pdf = pdfplumber.open(str(file_path), password=pw)
-            _ = pdf.pages[0].extract_text()
+            kwargs: dict = {"password": pw} if pw else {}
+            pdf = pdfplumber.open(str(file_path), **kwargs)
+            # Verify readable — will raise for wrong/missing password
+            if pdf.pages:
+                pdf.pages[0].extract_text()
             return pdf
         except Exception:  # noqa: BLE001
-            pdf.close()
+            if pdf is not None:
+                try:
+                    pdf.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
-    raise RuntimeError(f"Could not open encrypted PDF: {file_path.name}")
+    raise RuntimeError(f"Could not open PDF (encrypted or corrupt): {file_path.name}")
 
 
 def group_words_by_row(
