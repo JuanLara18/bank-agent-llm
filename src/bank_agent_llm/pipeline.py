@@ -18,6 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class FetchResult:
+    """Summary returned by Pipeline.fetch()."""
+
+    accounts_checked: int = 0
+    emails_scanned: int = 0
+    emails_new: int = 0
+    attachments_downloaded: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return len(self.errors) == 0
+
+
+@dataclass
 class ImportResult:
     """Summary returned by Pipeline.import_files()."""
 
@@ -184,9 +199,66 @@ class Pipeline:
         logger.info("Pipeline run started (fetch=%s parse=%s enrich=%s)", fetch, parse, enrich)
         raise NotImplementedError("run() not yet implemented — see docs/roadmap.md (M6)")
 
-    def fetch(self) -> None:
-        """Download new statement attachments from all configured email accounts."""
-        raise NotImplementedError("fetch() not yet implemented — see docs/roadmap.md (M5)")
+    def fetch(self) -> "FetchResult":
+        """Download new statement attachments from all configured email accounts.
+
+        Connects to each configured IMAP account, searches for emails matching
+        bank statement patterns, and saves PDF/XLSX attachments to data/raw/.
+        Already-processed message IDs are tracked in the DB to avoid duplicates.
+
+        Returns:
+            FetchResult with counts per outcome.
+        """
+        from bank_agent_llm.ingestion.imap_client import ImapClient
+        from bank_agent_llm.storage.database import get_session
+        from bank_agent_llm.storage.repository import ProcessedEmailRepository
+
+        self._init_db()
+        settings = self._get_settings()
+        raw_dir = Path(settings.pipeline.raw_data_dir)
+        result = FetchResult()
+
+        if not settings.email_accounts:
+            logger.warning("No email accounts configured. Add them to config.yaml.")
+            return result
+
+        for account_cfg in settings.email_accounts:
+            result.accounts_checked += 1
+            client = ImapClient(
+                host=account_cfg.imap_host,
+                port=account_cfg.imap_port,
+                username=account_cfg.username,
+                password=account_cfg.password,
+                use_ssl=account_cfg.use_ssl,
+                folders=account_cfg.folders,
+                subject_keywords=account_cfg.subject_keywords,
+                lookback_days=settings.pipeline.initial_lookback_days,
+            )
+
+            with get_session() as session:
+                repo = ProcessedEmailRepository(session)
+                account_result = client.fetch(
+                    dest_dir=raw_dir,
+                    processed_repo=repo,
+                    account_name=account_cfg.name,
+                )
+                session.commit()
+
+            result.emails_scanned += account_result.emails_scanned
+            result.emails_new += account_result.emails_new
+            result.attachments_downloaded += account_result.attachments_downloaded
+            result.errors.extend(account_result.errors)
+
+            logger.info(
+                "Account %r: scanned=%d new=%d files=%d errors=%d",
+                account_cfg.name,
+                account_result.emails_scanned,
+                account_result.emails_new,
+                account_result.attachments_downloaded,
+                len(account_result.errors),
+            )
+
+        return result
 
     def parse(self) -> None:
         """Parse any unprocessed statement files in the raw data directory."""
