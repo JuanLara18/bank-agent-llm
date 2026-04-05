@@ -374,6 +374,25 @@ class StatsRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
 
+    def all_transactions(
+        self,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        account_ids: list[int] | None = None,
+        include_cancelled: bool = True,
+    ) -> list[Transaction]:
+        """Return transactions matching the given filters."""
+        stmt = select(Transaction)
+        if date_from:
+            stmt = stmt.where(Transaction.date >= date_from)
+        if date_to:
+            stmt = stmt.where(Transaction.date <= date_to)
+        if account_ids:
+            stmt = stmt.where(Transaction.account_id.in_(account_ids))
+        if not include_cancelled:
+            stmt = stmt.where(~Transaction.tags.contains("cancelada"))
+        return list(self._s.execute(stmt).scalars())
+
     def build_report(self, top_n: int = 10) -> StatusReport:
         report = StatusReport()
 
