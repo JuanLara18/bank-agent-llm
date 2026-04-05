@@ -145,10 +145,47 @@ def import_files(
 
 
 @app.command("config-check")
-def config_check() -> None:
-    """Validate the current configuration file and report any errors."""
-    err_console.print("[yellow]Not yet implemented (M1).[/yellow]")
-    raise typer.Exit(1)
+def config_check(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
+) -> None:
+    """Validate the configuration file and report any errors."""
+    from pydantic import ValidationError
+    from rich.table import Table
+
+    from bank_agent_llm.config import get_settings
+
+    try:
+        settings = get_settings(config_path)
+    except FileNotFoundError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    except ValidationError as exc:
+        err_console.print("[red]Configuration is invalid:[/red]")
+        for error in exc.errors():
+            loc = " > ".join(str(x) for x in error["loc"])
+            err_console.print(f"  [red]•[/red] {loc}: {error['msg']}")
+        raise typer.Exit(1)
+
+    table = Table(title="Configuration", show_header=True, header_style="bold")
+    table.add_column("Setting")
+    table.add_column("Value")
+
+    table.add_row("Database URL", settings.database.url)
+    table.add_row("Ollama base URL", settings.ollama.base_url)
+    table.add_row("Categorization model", settings.ollama.categorization_model)
+    table.add_row("Chat model", settings.ollama.chat_model)
+    table.add_row("Email accounts", str(len(settings.email_accounts)))
+    table.add_row("Categories defined", str(len(settings.categories)))
+    table.add_row("Log level", settings.pipeline.log_level)
+
+    console.print(table)
+
+    if not settings.email_accounts:
+        console.print("[yellow]No email accounts configured — only manual import will work.[/yellow]")
+    if not settings.categories:
+        console.print("[yellow]No categories defined — enrichment will use defaults.[/yellow]")
+
+    console.print("[green]Configuration is valid.[/green]")
 
 
 # ─── DB sub-commands ─────────────────────────────────────────────────────────
