@@ -38,14 +38,14 @@ gantt
 - [x] `ParserFactory` unit tests
 - [x] GitHub Actions CI (lint + type check + tests on every PR)
 - [x] Issue and PR templates
-- [ ] `src/bank_agent_llm/config.py` — Pydantic Settings + `os.path.expandvars` YAML loader
-- [ ] `bank-agent config-check` — validates config and reports errors clearly (no stack traces)
-- [ ] `src/storage/models.py` — SQLAlchemy models: `Account`, `Transaction`, `Category`, `ProcessedEmail`, `FileProcessingRun`, `PipelineRun`
-- [ ] `src/storage/repository.py` — repository class per model
-- [ ] First Alembic migration (`001_initial_schema`)
-- [ ] `bank-agent db migrate` and `bank-agent db reset` implemented
-- [ ] Unit tests for config validation
-- [ ] Unit tests for repository layer (in-memory SQLite)
+- [x] `src/bank_agent_llm/config.py` — Pydantic Settings + `os.path.expandvars` YAML loader
+- [x] `bank-agent config-check` — validates config and reports errors clearly (no stack traces)
+- [x] `src/storage/models.py` — SQLAlchemy models: `Account`, `Transaction`, `Category`, `ProcessedEmail`, `FileProcessingRun`, `PipelineRun`
+- [x] `src/storage/repository.py` — repository class per model
+- [x] First Alembic migration (`001_initial_schema`)
+- [x] `bank-agent db migrate` and `bank-agent db reset` implemented
+- [x] Unit tests for config validation
+- [x] Unit tests for repository layer (in-memory SQLite)
 
 ---
 
