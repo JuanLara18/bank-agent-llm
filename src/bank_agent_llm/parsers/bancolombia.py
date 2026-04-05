@@ -188,18 +188,23 @@ def _parse_row(
     if next_idx < len(tokens):
         inst_match = _INSTALLMENT_RE.match(tokens[next_idx])
         if inst_match:
-            installment_label = tokens[next_idx]  # e.g. "1/12"
-            # Scan forward for the next "$ amount" pair
-            for j in range(next_idx + 1, len(tokens) - 1):
-                if tokens[j] == "$":
-                    try:
-                        cuota = parse_cop(tokens[j + 1])
-                        if cuota > Decimal("0"):
-                            amount = cuota
-                            description = f"{description} {installment_label}"
-                            break
-                    except ValueError:
-                        pass
+            inst_num = int(inst_match.group(1))
+            inst_total = int(inst_match.group(2))
+            # Only apply installment logic for deferred purchases (total > 1 installment).
+            # Single-payment rows (1/1) are normal transactions — leave them unchanged.
+            if inst_total > 1:
+                installment_label = tokens[next_idx]  # e.g. "1/12"
+                # Scan forward for the next "$ amount" pair (cuota mensual column)
+                for j in range(next_idx + 1, len(tokens) - 1):
+                    if tokens[j] == "$":
+                        try:
+                            cuota = parse_cop(tokens[j + 1])
+                            if cuota > Decimal("0"):
+                                amount = cuota
+                                description = f"{description} {installment_label}"
+                                break
+                        except ValueError:
+                            pass
 
     # Negative amounts are credits (payments/refunds); positive are debits (purchases)
     if amount < Decimal("0"):

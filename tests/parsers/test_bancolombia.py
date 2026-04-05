@@ -103,6 +103,45 @@ def test_parse_row_r_prefixed_auth_code() -> None:
     assert tx.raw_description == "CURSOR USAGE"
 
 
+# ── Installment rows (Ampliacion de Plazo) ───────────────────────────────────
+
+def test_parse_row_single_installment_unchanged() -> None:
+    """1/1 rows (single payment) must not be modified — amount and description stay."""
+    tokens = ["11/02/2026", "DLO*DIDI", "$", "9.600,00", "1/1", "$", "9.600,00"]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.amount == Decimal("9600.00")
+    assert tx.raw_description == "DLO*DIDI"
+
+
+def test_parse_row_deferred_uses_monthly_installment() -> None:
+    """N/M rows (deferred purchase) must store the cuota mensual, not the total balance."""
+    # Mirrors: AMPLIACION DE PLAZO $5.617.637,43  1/12  $468.136,45  ...
+    tokens = [
+        "000000", "30/10/2025", "AMPLIACION", "DE", "PLAZO",
+        "$", "5.617.637,43", "1/12", "$", "468.136,45",
+        "1,8312", "%", "24,3283", "%", "$", "5.149.500,98",
+    ]
+    tx = _parse_row(tokens, "file.pdf", 0)
+    assert tx is not None
+    assert tx.amount == Decimal("468136.45")
+    assert tx.raw_description == "AMPLIACION DE PLAZO 1/12"
+    assert tx.direction == TransactionDirection.DEBIT
+
+
+def test_parse_row_deferred_different_installment_number() -> None:
+    """Each installment (e.g. 3/12) gets a unique description hash."""
+    tokens = [
+        "000000", "30/10/2025", "AMPLIACION", "DE", "PLAZO",
+        "$", "5.149.500,98", "3/12", "$", "468.200,00",
+        "1,8312", "%", "$", "4.681.300,00",
+    ]
+    tx = _parse_row(tokens, "file.pdf", 2)
+    assert tx is not None
+    assert tx.amount == Decimal("468200.00")
+    assert tx.raw_description == "AMPLIACION DE PLAZO 3/12"
+
+
 # ── _untriple ─────────────────────────────────────────────────────────────────
 
 def test_untriple_valid() -> None:
