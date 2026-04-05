@@ -1,6 +1,6 @@
 # bank-agent-llm
 
-Local-first, AI-powered pipeline for personal financial intelligence. Fetches bank statements from email, parses them across bank formats, categorizes transactions with a local LLM, and surfaces the data via Power BI dashboards and a natural-language CLI.
+Local-first, AI-powered pipeline for personal financial intelligence. Import bank statements from local files or email, parse them across any bank format, categorize transactions with a rules engine and optional local LLM, and explore the data via a terminal dashboard and natural-language CLI.
 
 **All processing is 100% local — financial data never leaves the machine.**
 
@@ -10,28 +10,29 @@ Local-first, AI-powered pipeline for personal financial intelligence. Fetches ba
 
 ```mermaid
 flowchart LR
-    A([Email Accounts\nIMAP]) --> B[Ingestion]
+    A([Local Files\nor Email]) --> B[Ingestion]
     B --> C{Parser Factory}
     C --> D[Bank A]
     C --> E[Bank B]
     C --> F[Bank N]
-    D & E & F --> G[Enrichment\nOllama LLM]
+    D & E & F --> G[Enrichment\nRules → Ollama]
     G --> H[(SQLite / PostgreSQL)]
-    H --> I[Power BI\nDashboard]
-    H --> J[CLI Chat\nText-to-SQL]
+    H --> I[Dashboard]
+    H --> J[CLI Chat\nread-only]
 ```
 
 ---
 
 ## Features
 
-- Connects to multiple IMAP email accounts simultaneously
+- Import statements from a local folder (`bank-agent import`) — no email setup required
+- Also supports IMAP ingestion from multiple email accounts (`bank-agent fetch`)
 - Auto-detects bank format and routes to the correct parser (Factory pattern)
 - Normalizes transactions from any bank into a single schema
-- Categorizes raw transaction descriptions using a local Ollama model
+- Categorizes transactions with a rules engine first; Ollama LLM as optional fallback
 - Incrementally updates — only processes new statements on each run
-- Power BI dashboard ready via direct SQLite/PostgreSQL connection
-- Natural-language chat over your transaction history (`bank-agent chat`)
+- Terminal dashboard and optional Streamlit web view
+- Natural-language chat over your transaction history (`bank-agent chat`, read-only)
 - Usable as a CLI tool or as a Python library
 
 ---
@@ -39,14 +40,16 @@ flowchart LR
 ## CLI
 
 ```
+bank-agent import <path>  Import statement files from a local path (primary method)
 bank-agent run            Full pipeline: fetch → parse → enrich → store
 bank-agent fetch          Download new statements from email accounts
 bank-agent parse          Parse downloaded statement files
-bank-agent enrich         Categorise transactions via Ollama
-bank-agent status         Show database summary
-bank-agent chat           Interactive natural-language query session
+bank-agent enrich         Categorise transactions via rules engine + Ollama
+bank-agent status         Terminal dashboard summary
+bank-agent chat           Natural-language query session (read-only)
 bank-agent config-check   Validate configuration file
 bank-agent db migrate     Apply pending database migrations
+bank-agent db purge       Delete transactions before a given date
 bank-agent db reset       Drop and recreate the database
 bank-agent --version      Show version
 ```
@@ -59,12 +62,12 @@ bank-agent --version      Show version
 from bank_agent_llm import Pipeline
 
 pipeline = Pipeline(config_path="config/config.yaml")
-pipeline.run()
 
-# Or run individual stages:
-pipeline.fetch()
-pipeline.parse()
-pipeline.enrich()
+# Import from a local folder (no email needed)
+pipeline.import_files("./my-statements/")
+
+# Or run the full pipeline including email fetch
+pipeline.run()
 ```
 
 ---
@@ -101,7 +104,7 @@ Adding a bank requires one file. See [docs/adding-a-parser.md](docs/adding-a-par
 
 ## Project Status
 
-**M1: Foundation** — in progress. See [docs/roadmap.md](docs/roadmap.md).
+**M1: Foundation** — in progress (M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9). See [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
