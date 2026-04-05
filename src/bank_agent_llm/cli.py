@@ -25,8 +25,8 @@ app = typer.Typer(
 db_app = typer.Typer(help="Database management commands.")
 app.add_typer(db_app, name="db")
 
-console = Console()
-err_console = Console(stderr=True)
+console = Console(highlight=False)
+err_console = Console(stderr=True, highlight=False)
 
 
 def _setup_logging(level: str) -> None:
@@ -122,12 +122,143 @@ def enrich(
 
 @app.command()
 def status(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
+    top: int = typer.Option(10, help="Number of top items to show."),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
-    """Show a summary of transactions currently in the database."""
+    """Show a financial summary dashboard of all transactions in the database."""
     _setup_logging(log_level)
-    err_console.print("[yellow]Not yet implemented (M5).[/yellow]")
-    raise typer.Exit(1)
+    from decimal import Decimal
+
+    from rich import box
+    from rich.columns import Columns
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    from bank_agent_llm.pipeline import Pipeline
+    from bank_agent_llm.storage.database import get_session
+    from bank_agent_llm.storage.repository import StatsRepository
+    from bank_agent_llm.enrichment.tags import get_taxonomy
+
+    pipeline = Pipeline(config_path=config_path)
+    try:
+        pipeline._init_db()
+    except Exception as exc:
+        err_console.print(f"[red]Cannot open database: {exc}[/red]")
+        raise typer.Exit(1)
+
+    with get_session() as session:
+        report = StatsRepository(session).build_report(top_n=top)
+
+    if report.total_transactions == 0:
+        console.print("[yellow]No transactions found. Run 'bank-agent import <path>' first.[/yellow]")
+        raise typer.Exit(0)
+
+    taxonomy = get_taxonomy()
+
+    def _cop(amount: Decimal) -> str:
+        return f"${amount:,.0f}"
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    date_range = (
+        f"{report.date_min} al {report.date_max}"
+        if report.date_min and report.date_max
+        else "-"
+    )
+    tagged = report.total_transactions - report.pending_enrichment
+    tagged_pct = tagged / report.total_transactions * 100
+
+    overview = Table(show_header=False, box=None, padding=(0, 2))
+    overview.add_column(style="bold cyan")
+    overview.add_column()
+    overview.add_row("Transacciones", str(report.total_transactions))
+    overview.add_row("Período", date_range)
+    overview.add_row("Gasto total", f"[red]{_cop(report.total_debit)}[/red]")
+    overview.add_row("Ingresos / pagos", f"[green]{_cop(report.total_credit)}[/green]")
+    overview.add_row(
+        "Categorizadas",
+        f"[green]{tagged}[/green] / {report.total_transactions} "
+        f"([green]{tagged_pct:.0f}%[/green])"
+        + (f" — [yellow]{report.pending_enrichment} pendientes[/yellow]"
+           if report.pending_enrichment else ""),
+    )
+    console.print(Panel(overview, title="[bold]Resumen General[/bold]", border_style="cyan"))
+
+    # ── Accounts ──────────────────────────────────────────────────────────────
+    acc_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    acc_table.add_column("Banco")
+    acc_table.add_column("Txns", justify="right")
+    acc_table.add_column("Desde")
+    acc_table.add_column("Hasta")
+    acc_table.add_column("Gasto", justify="right", style="red")
+    acc_table.add_column("Créditos", justify="right", style="green")
+    for acc in sorted(report.accounts, key=lambda a: a.total_debit, reverse=True):
+        acc_table.add_row(
+            acc.bank_name,
+            str(acc.total),
+            str(acc.date_min) if acc.date_min else "—",
+            str(acc.date_max) if acc.date_max else "—",
+            _cop(acc.total_debit),
+            _cop(acc.total_credit),
+        )
+    console.print(Panel(acc_table, title="[bold]Por Cuenta[/bold]", border_style="blue"))
+
+    # ── Top Tags + Top Merchants (side by side) ───────────────────────────────
+    tags_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    tags_table.add_column("Categoría")
+    tags_table.add_column("Txns", justify="right")
+    tags_table.add_column("Total", justify="right", style="red")
+    for ts in report.top_tags:
+        name = taxonomy.display_name(ts.tag) or ts.tag
+        tags_table.add_row(name, str(ts.count), _cop(ts.total))
+
+    merchants_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    merchants_table.add_column("Comercio")
+    merchants_table.add_column("Txns", justify="right")
+    merchants_table.add_column("Total", justify="right", style="red")
+    for ms in report.top_merchants:
+        merchants_table.add_row(ms.merchant[:28], str(ms.count), _cop(ms.total))
+
+    console.print(Columns([
+        Panel(tags_table, title="[bold]Top Categorías[/bold]", border_style="magenta"),
+        Panel(merchants_table, title="[bold]Top Comercios[/bold]", border_style="yellow"),
+    ]))
+
+    # ── Monthly trend ─────────────────────────────────────────────────────────
+    if report.monthly:
+        max_debit = max(m.debit for m in report.monthly) or Decimal("1")
+        monthly_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+        monthly_table.add_column("Mes")
+        monthly_table.add_column("Gasto", justify="right", style="red")
+        monthly_table.add_column("Ingresos", justify="right", style="green")
+        monthly_table.add_column("Barra", no_wrap=True)
+        for m in report.monthly:
+            bar_len = int(m.debit / max_debit * 30)
+            bar = "|" * bar_len
+            monthly_table.add_row(m.label, _cop(m.debit), _cop(m.credit), f"[red]{bar}[/red]")
+        console.print(Panel(monthly_table, title="[bold]Tendencia Mensual[/bold]", border_style="green"))
+
+    # ── Spending by day of week ───────────────────────────────────────────────
+    if report.by_weekday:
+        max_day = max(d.total for d in report.by_weekday) or Decimal("1")
+        wd_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+        wd_table.add_column("Día")
+        wd_table.add_column("Txns", justify="right")
+        wd_table.add_column("Total", justify="right", style="red")
+        wd_table.add_column("Barra", no_wrap=True)
+        for d in report.by_weekday:
+            bar_len = int(d.total / max_day * 25)
+            bar = "|" * bar_len
+            wd_table.add_row(d.label, str(d.count), _cop(d.total), f"[magenta]{bar}[/magenta]")
+        console.print(Panel(wd_table, title="[bold]Gasto por Día de Semana[/bold]", border_style="magenta"))
+
+    # ── Pending warning ───────────────────────────────────────────────────────
+    if report.pending_enrichment:
+        console.print(
+            f"[yellow]{report.pending_enrichment} transacción(es) sin categorizar. "
+            "Ejecuta 'bank-agent enrich' para procesarlas.[/yellow]"
+        )
 
 
 @app.command()
