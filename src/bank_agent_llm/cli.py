@@ -86,17 +86,35 @@ def parse(
 
 @app.command()
 def enrich(
+    force: bool = typer.Option(False, "--force", help="Re-tag already-tagged transactions."),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
-    """Categorise transactions using the local Ollama model."""
+    """Tag transactions with the rules engine and optional Ollama LLM."""
     _setup_logging(log_level)
+    from rich.table import Table
     from bank_agent_llm.pipeline import Pipeline
 
-    try:
-        Pipeline().enrich()
-    except NotImplementedError:
-        err_console.print("[yellow]Not yet implemented (M4).[/yellow]")
-        raise typer.Exit(1)
+    result = Pipeline(config_path=config_path).enrich(force=force)
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("Total processed", str(result.total))
+    table.add_row("Tagged by rules", f"[green]{result.by_rules}[/green]")
+    table.add_row("Tagged from cache", f"[green]{result.by_cache}[/green]")
+    table.add_row("Tagged by LLM", f"[cyan]{result.by_llm}[/cyan]")
+    table.add_row("Skipped (manual)", str(result.skipped_manual))
+    table.add_row("Already tagged", str(result.already_tagged))
+    table.add_row("Pending (no LLM)", f"[yellow]{result.pending}[/yellow]" if result.pending else "0")
+    console.print(table)
+
+    if result.llm_unavailable:
+        console.print(
+            "[yellow]Ollama was unavailable. Install and start it, then run "
+            "'bank-agent enrich' again to tag remaining transactions.[/yellow]"
+        )
+        console.print("  [dim]ollama pull mistral:7b && ollama serve[/dim]")
 
 
 @app.command()
