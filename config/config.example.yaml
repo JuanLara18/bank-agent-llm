@@ -82,3 +82,9 @@ pipeline:
   # How far back to look for emails on the very first run
   initial_lookback_days: 365
   log_level: INFO          # DEBUG | INFO | WARNING | ERROR
+  # Passwords tried in order when opening encrypted PDF statements.
+  # Most Colombian banks encrypt PDFs with the account holder's ID number.
+  # Store values in .env and reference them here.
+  pdf_passwords:
+    - ${PDF_PASSWORD_1}
+    # - ${PDF_PASSWORD_2}
