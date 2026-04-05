@@ -155,9 +155,15 @@ class FileProcessingRunRepository:
         self._s = session
 
     def is_processed(self, file_hash: str) -> bool:
+        """Return True if the file should be skipped on the next import run.
+
+        - "success" → already imported, skip.
+        - "skipped" → no parser exists; re-importing same bytes yields same outcome, skip.
+        - "error"   → parse failed; may succeed after a fix, so retry (return False).
+        """
         stmt = select(FileProcessingRun).where(
             FileProcessingRun.file_hash == file_hash,
-            FileProcessingRun.status == "success",
+            FileProcessingRun.status.in_(["success", "skipped"]),
         )
         return self._s.execute(stmt).scalar_one_or_none() is not None
 
