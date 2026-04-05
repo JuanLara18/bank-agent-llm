@@ -6,10 +6,16 @@ from pathlib import Path
 
 from bank_agent_llm.parsers.base import BankParser, ParseError
 
-# Register new parsers here as they are implemented:
-# from bank_agent_llm.parsers.bancolombia import BancolombiaParser
-_PARSERS: list[BankParser] = [
-    # BancolombiaParser(),
+from bank_agent_llm.parsers.bancolombia import BancolombiaParser
+from bank_agent_llm.parsers.falabella import FalabellaParser
+from bank_agent_llm.parsers.scotiabank import ScotiabankParser
+
+# Parser classes registered in priority order (more specific signatures first).
+# ParserFactory instantiates them with passwords at call time.
+_PARSER_CLASSES = [
+    BancolombiaParser,
+    FalabellaParser,
+    ScotiabankParser,
 ]
 
 
@@ -60,7 +66,20 @@ class ParserFactory:
     """Routes a statement file to the correct BankParser."""
 
     def __init__(self, parsers: list[BankParser] | None = None) -> None:
-        self._parsers = parsers if parsers is not None else _PARSERS
+        # Allow injecting pre-built parser instances (e.g. in tests)
+        self._parsers = parsers  # None = build from _PARSER_CLASSES at call time
+
+    def _build_parsers(self, passwords: list[str] | None) -> list[BankParser]:
+        """Instantiate registered parsers with the given passwords."""
+        if self._parsers is not None:
+            return self._parsers
+        result: list[BankParser] = []
+        for cls in _PARSER_CLASSES:
+            try:
+                result.append(cls(passwords=passwords))  # type: ignore[call-arg]
+            except TypeError:
+                result.append(cls())  # ScotiabankParser has no passwords arg
+        return result
 
     def get_parser(
         self, file_path: Path, *, passwords: list[str] | None = None
@@ -80,7 +99,7 @@ class ParserFactory:
             UnsupportedBankError: If no registered parser matches.
         """
         hint = _extract_pdf_hint(file_path, passwords=passwords)
-        for parser in self._parsers:
+        for parser in self._build_parsers(passwords):
             if parser.can_parse(file_path, hint=hint):
                 return parser
         raise UnsupportedBankError(file_path)
@@ -88,4 +107,4 @@ class ParserFactory:
     @property
     def supported_banks(self) -> list[str]:
         """List of bank names for which parsers are registered."""
-        return [p.bank_name for p in self._parsers]
+        return [p.bank_name for p in self._build_parsers(None)]
