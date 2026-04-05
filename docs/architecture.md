@@ -1,136 +1,167 @@
 # Architecture
 
-## Overview
+## Pipeline overview
 
-bank-agent-llm is structured as a layered ETL pipeline with a local LLM layer on top.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    INGESTION LAYER                       │
-│  IMAP Client → Filter Attachments → Deduplication       │
-│  (src/ingestion/)                                        │
-└─────────────────────────┬───────────────────────────────┘
-                          │ raw PDF/XLS files
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                    PARSER FACTORY                        │
-│  Detect bank → Select Parser → Extract transactions      │
-│  (src/parsers/)                                          │
-└─────────────────────────┬───────────────────────────────┘
-                          │ normalized Transaction objects
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                   ENRICHMENT LAYER                       │
-│  Raw description → Ollama LLM → Category + confidence   │
-│  (src/enrichment/)                                       │
-└─────────────────────────┬───────────────────────────────┘
-                          │ enriched Transaction objects
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                    STORAGE LAYER                         │
-│  SQLAlchemy models + Alembic migrations + SQLite DB      │
-│  (src/storage/)                                          │
-└──────────────┬──────────────────────┬───────────────────┘
-               │                      │
-               ▼                      ▼
-┌──────────────────────┐   ┌─────────────────────────────┐
-│  Power BI Dashboard  │   │   Chat-to-SQL Interface      │
-│  (ODBC / SQLite)     │   │   Ollama → SQL → Answer      │
-│                      │   │   (src/chat/)                │
-└──────────────────────┘   └─────────────────────────────┘
+```mermaid
+flowchart LR
+    A([Email Accounts\nIMAP]) --> B[Ingestion]
+    B --> C{Parser Factory}
+    C --> D[Bank A]
+    C --> E[Bank B]
+    C --> F[Bank N]
+    D & E & F --> G[Enrichment\nOllama]
+    G --> H[(Database)]
+    H --> I[Power BI]
+    H --> J[CLI Chat]
 ```
 
-## Data Model
+## Layer detail
 
-### Core Tables
+```mermaid
+flowchart TD
+    subgraph ing["Ingestion — src/ingestion/"]
+        direction LR
+        IC[IMAP Client] --> AF[Attachment Filter]
+        AF --> DR[Dedup Registry]
+        DR --> FS[data/raw/]
+    end
 
-**accounts** — one row per bank account tracked
-```
-id, bank_name, account_number_hash, owner_email, currency, created_at
-```
+    subgraph par["Parsers — src/parsers/"]
+        direction LR
+        PF[ParserFactory\nget_parser&#40;file&#41;] --> BA[BankA Parser]
+        PF --> BB[BankB Parser]
+        PF --> BN[... Parser]
+    end
 
-**transactions** — one row per transaction
-```
-id, account_id, date, amount, direction (debit/credit),
-raw_description, normalized_description, category_id,
-category_confidence, source_file, created_at
-```
-Unique constraint: `(account_id, date, amount, description_hash)` — prevents duplicates.
+    subgraph enr["Enrichment — src/enrichment/"]
+        direction LR
+        OC[Ollama Client] --> CAT[Categorizer]
+        CAT --> CC[Category Cache\navoid re-calling LLM]
+    end
 
-**categories** — user-defined or AI-suggested
-```
-id, name, parent_id, color
-```
+    subgraph sto["Storage — src/storage/"]
+        direction LR
+        MOD[SQLAlchemy Models] --- REP[Repository Layer]
+        MIG[Alembic Migrations] --> MOD
+    end
 
-**processed_emails** — deduplication registry
-```
-id, email_account, message_id, subject, processed_at
-```
-
-## Parser Pattern
-
-```python
-# base class (src/parsers/base.py)
-class BankParser(ABC):
-    @abstractmethod
-    def can_parse(self, file_path: Path) -> bool: ...
-
-    @abstractmethod
-    def parse(self, file_path: Path) -> list[Transaction]: ...
-
-# factory (src/parsers/factory.py)
-class ParserFactory:
-    _parsers: list[BankParser] = [...]
-
-    def get_parser(self, file_path: Path) -> BankParser:
-        for parser in self._parsers:
-            if parser.can_parse(file_path):
-                return parser
-        raise UnsupportedBankError(file_path)
+    ing --> par
+    par --> enr
+    enr --> sto
 ```
 
-## Configuration Schema
+## Data model
 
-```yaml
-# config/config.example.yaml
+```mermaid
+erDiagram
+    accounts {
+        int id PK
+        string bank_name
+        string account_number_hash
+        string owner_email
+        string currency
+        datetime created_at
+    }
 
-database:
-  url: "sqlite:///data/bank_agent.db"  # or postgresql://...
+    transactions {
+        int id PK
+        int account_id FK
+        date date
+        decimal amount
+        string direction
+        string raw_description
+        string normalized_description
+        int category_id FK
+        float category_confidence
+        string source_file
+        string description_hash
+        datetime created_at
+    }
 
-email_accounts:
-  - name: "personal"
-    imap_host: "imap.gmail.com"
-    imap_port: 993
-    username: "your@gmail.com"
-    password: "${EMAIL_PASSWORD}"  # reads from .env
+    categories {
+        int id PK
+        string name
+        int parent_id FK
+        string color
+    }
 
-ollama:
-  base_url: "http://localhost:11434"
-  categorization_model: "llama3.2"
-  chat_model: "phi3"
+    processed_emails {
+        int id PK
+        string email_account
+        string message_id
+        string subject
+        datetime processed_at
+    }
 
-categories:
-  - name: "Food & Dining"
-    subcategories: ["Restaurants", "Groceries", "Delivery"]
-  - name: "Transport"
-    subcategories: ["Fuel", "Rideshare", "Public Transit"]
-  # ... more categories
+    accounts ||--o{ transactions : has
+    categories ||--o{ transactions : classifies
+    categories ||--o{ categories : parent
 ```
 
-## Technology Choices (ADRs)
+## Parser pattern
 
-### SQLite over PostgreSQL (default)
-**Decision:** Use SQLite as the default database.
-**Reason:** Zero-setup for new users. Power BI can connect directly via ODBC. Can be switched to PostgreSQL via a single config line.
+```mermaid
+classDiagram
+    class BankParser {
+        <<abstract>>
+        +bank_name() str
+        +can_parse(file_path) bool
+        +parse(file_path) list~RawTransaction~
+    }
 
-### uv over pip/poetry
-**Decision:** Use `uv` for dependency management.
-**Reason:** Significantly faster installs, built-in virtual env management, compatible with `pyproject.toml`.
+    class ParserFactory {
+        -_parsers list~BankParser~
+        +get_parser(file_path) BankParser
+        +supported_banks() list~str~
+    }
 
-### pdfplumber over PyPDF2
-**Decision:** Use `pdfplumber` as primary PDF library.
-**Reason:** Better handling of tabular data in PDFs (essential for bank statements). PyPDF2 as fallback for simple text extraction.
+    class BankAParser {
+        +bank_name = "BankA"
+        +SIGNATURE = "..."
+        +can_parse(file_path) bool
+        +parse(file_path) list~RawTransaction~
+    }
 
-### Ollama over OpenAI API
-**Decision:** Use local Ollama models exclusively.
-**Reason:** Bank data is sensitive. Users should never need to send financial information to external APIs.
+    class BankBParser {
+        +bank_name = "BankB"
+        +can_parse(file_path) bool
+        +parse(file_path) list~RawTransaction~
+    }
+
+    BankParser <|-- BankAParser
+    BankParser <|-- BankBParser
+    ParserFactory o-- BankParser
+```
+
+## CLI architecture
+
+```mermaid
+flowchart TD
+    CLI[bank-agent CLI\ncli.py] --> PL[Pipeline\npipeline.py]
+    PL --> ING[ingestion/]
+    PL --> PAR[parsers/]
+    PL --> ENR[enrichment/]
+    PL --> STO[storage/]
+    CLI --> CHAT[chat/]
+    CLI --> CFG[config-check\nconfig.py]
+    CLI --> DB[db migrate\nalembic]
+```
+
+The CLI is a thin layer. Every command delegates immediately to `Pipeline` or a module. This keeps the library usable independently of the CLI.
+
+## Architectural decisions
+
+### SQLite as default database
+Zero setup for new users. Power BI connects via ODBC. Switchable to PostgreSQL via one config line.
+
+### Direct Ollama API over LangChain
+Fewer dependencies, full control over prompts, no framework abstractions between the LLM call and the code.
+
+### imapclient over stdlib imaplib
+`imapclient` provides a clean, Pythonic API with proper connection management. `imaplib` is verbose and error-prone for multi-folder, multi-account setups.
+
+### tenacity for retries
+Both IMAP connections and Ollama calls are network operations that can transiently fail. `tenacity` handles exponential backoff with one decorator — no manual retry loops.
+
+### pdfplumber as primary PDF library
+Handles multi-column, tabular PDF layouts (common in bank statements) far better than PyPDF2, which is limited to simple text extraction.
