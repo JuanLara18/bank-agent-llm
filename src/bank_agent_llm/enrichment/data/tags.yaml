@@ -88,6 +88,17 @@ tags:
       - id: seguro
         display: "Seguros de Salud"
 
+  - id: deporte
+    display: "Deporte y Bienestar"
+    color: "#84CC16"
+    icon: "🏃"
+    is_expense: true
+    children:
+      - id: gym
+        display: "Gimnasio"
+      - id: tienda-deportiva
+        display: "Tiendas Deportivas"
+
   - id: banco
     display: "Cargos Bancarios"
     color: "#6B7280"
@@ -102,6 +113,8 @@ tags:
         display: "Seguros Bancarios"
       - id: impuesto-gmf
         display: "Impuesto GMF 4×1000"
+      - id: comisiones
+        display: "Comisiones y Cargos"
 
   # ── Non-expense tags (excluded from spending charts) ─────────────────────
 
@@ -121,4 +134,10 @@ tags:
     display: "Ingreso / Devolución"
     color: "#22C55E"
     icon: "↓"
+    is_expense: false
+
+  - id: cancelada
+    display: "Transacción Cancelada"
+    color: "#94A3B8"
+    icon: "✕"
     is_expense: false

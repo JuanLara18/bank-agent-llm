@@ -399,3 +399,72 @@ rules:
     patterns:
       - "COMPRA BOTON PSE"
       - "BOTÓN PSE"
+
+  # ── Educación ─────────────────────────────────────────────────────────────────
+
+  - tags: [tech, software]
+    merchant: "Coursera"
+    patterns:
+      - "COURSERA"
+
+  # ── Deporte ───────────────────────────────────────────────────────────────────
+
+  - tags: [deporte, tienda-deportiva]
+    merchant: "Decathlon"
+    patterns:
+      - "DECATHLON"
+
+  # ── Seguros adicionales ───────────────────────────────────────────────────────
+
+  - tags: [banco, seguro-bancario]
+    merchant: "Seguro de Vida"
+    patterns:
+      - "SEGURO DE VIDA"
+      - "SEGURO VIDA OBLIGATORIO"
+
+  # ── Cargos bancarios adicionales ──────────────────────────────────────────────
+
+  - tags: [banco, comisiones]
+    merchant: "Ampliación de Plazo"
+    patterns:
+      - "AMPLIACION DE PLAZO"
+      - "AMPLIACIÓN DE PLAZO"
+
+  # ── Pagos intermediarios ──────────────────────────────────────────────────────
+
+  - tags: [transferencia]
+    merchant: "Mercado Pago"
+    patterns:
+      - "MERCADO PAGO"
+
+  - tags: [transporte, uber]
+    merchant: "Uber (PayU)"
+    patterns:
+      - "PAYU UBER"
+
+  # ── Restaurantes adicionales ──────────────────────────────────────────────────
+
+  - tags: [comida, restaurante]
+    merchant: "Restaurante"
+    patterns:
+      - "RESTAURANTE"
+      - "TANUKI"
+      - "AREPAS"
+      - "CAFE CHAMOI"
+      - "CHAMOI"
+
+  # ── Tiendas adicionales ───────────────────────────────────────────────────────
+
+  - tags: [comida, tienda]
+    merchant: "Tienda"
+    patterns:
+      - "SU TIENDA"
+
+  # ── Transacciones canceladas / reversadas ─────────────────────────────────────
+  # Debe ir al final — tiene prioridad baja ya que el prefijo "CANCELADA" es genérico.
+  # is_expense: false en el taxonomy (no afectan el gasto real).
+
+  - tags: [cancelada]
+    merchant: null
+    patterns:
+      - "CANCELADA"
