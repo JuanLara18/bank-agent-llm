@@ -119,6 +119,31 @@ def chat(
     raise typer.Exit(1)
 
 
+@app.command("import")
+def import_files(
+    path: str = typer.Argument(..., help="Path to a statement file or directory of files."),
+    log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
+) -> None:
+    """Import statement files from a local path, skipping email ingestion.
+
+    Use this when you have already downloaded statements from your bank's
+    web portal or have an existing folder of PDFs/spreadsheets.
+    """
+    _setup_logging(log_level)
+    from pathlib import Path
+
+    from bank_agent_llm.pipeline import Pipeline
+
+    try:
+        Pipeline().import_files(Path(path))
+    except NotImplementedError:
+        err_console.print("[yellow]Not yet implemented (M2).[/yellow]")
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        err_console.print(f"[red]Path not found: {path}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command("config-check")
 def config_check() -> None:
     """Validate the current configuration file and report any errors."""
@@ -133,6 +158,28 @@ def db_migrate() -> None:
     """Apply pending Alembic database migrations."""
     err_console.print("[yellow]Not yet implemented (M1).[/yellow]")
     raise typer.Exit(1)
+
+
+@db_app.command("purge")
+def db_purge(
+    before: str = typer.Option(..., help="Delete transactions before this date (YYYY-MM-DD)."),
+    confirm: bool = typer.Option(False, "--yes", help="Skip confirmation prompt."),
+) -> None:
+    """Delete all transactions before a given date. [red]Destructive.[/red]"""
+    if not confirm:
+        confirmed = typer.confirm(
+            f"This will permanently delete all transactions before {before}. Continue?",
+            default=False,
+        )
+        if not confirmed:
+            raise typer.Abort()
+    from bank_agent_llm.pipeline import Pipeline
+
+    try:
+        Pipeline().purge(before=before)
+    except NotImplementedError:
+        err_console.print("[yellow]Not yet implemented (M5).[/yellow]")
+        raise typer.Exit(1)
 
 
 @db_app.command("reset")
