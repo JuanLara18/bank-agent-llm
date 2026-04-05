@@ -1,0 +1,78 @@
+# bank-agent-llm Configuration Template
+# Copy this file to config/config.yaml and fill in your values.
+# NEVER commit config.yaml — it contains credentials.
+
+# ─── Database ────────────────────────────────────────────────────────────────
+database:
+  # SQLite (default, zero-setup):
+  url: "sqlite:///data/bank_agent.db"
+  # PostgreSQL (optional, for power users):
+  # url: "postgresql://user:password@localhost:5432/bank_agent"
+
+# ─── Email Accounts ──────────────────────────────────────────────────────────
+# Add as many accounts as you need.
+email_accounts:
+  - name: "personal"           # Friendly name (used in logs)
+    imap_host: "imap.gmail.com"
+    imap_port: 993
+    use_ssl: true
+    username: "your@gmail.com"
+    # Use app password for Gmail (not your regular password)
+    # Store actual value in .env as EMAIL_PERSONAL_PASSWORD
+    password: "${EMAIL_PERSONAL_PASSWORD}"
+    # Only look in these folders (leave empty to search all)
+    folders: ["INBOX", "Extractos"]
+    # Keywords to filter emails (subject contains any of these)
+    subject_keywords: ["extracto", "estado de cuenta", "resumen"]
+
+  # - name: "work"
+  #   imap_host: "outlook.office365.com"
+  #   imap_port: 993
+  #   use_ssl: true
+  #   username: "your@company.com"
+  #   password: "${EMAIL_WORK_PASSWORD}"
+
+# ─── Ollama (Local LLM) ──────────────────────────────────────────────────────
+ollama:
+  base_url: "http://localhost:11434"
+  # Model for transaction categorization (fast, small)
+  categorization_model: "llama3.2"
+  # Model for chat-to-SQL queries (can be larger)
+  chat_model: "llama3.2"
+  # Max tokens per categorization request
+  max_tokens: 100
+
+# ─── Categories ──────────────────────────────────────────────────────────────
+# Define the categories your LLM will use for classification.
+# You can customize these to match your spending habits.
+categories:
+  - name: "Food & Dining"
+    subcategories: ["Restaurants", "Groceries", "Coffee", "Food Delivery"]
+  - name: "Transport"
+    subcategories: ["Fuel", "Rideshare (Uber/InDrive)", "Public Transit", "Parking", "Car Maintenance"]
+  - name: "Housing"
+    subcategories: ["Rent", "Utilities (Water/Gas/Electric)", "Internet", "Home Supplies"]
+  - name: "Health"
+    subcategories: ["Pharmacy", "Doctor/Clinic", "Gym", "Insurance"]
+  - name: "Entertainment"
+    subcategories: ["Streaming", "Events", "Hobbies"]
+  - name: "Shopping"
+    subcategories: ["Clothing", "Electronics", "Online Shopping"]
+  - name: "Education"
+    subcategories: ["Books", "Courses", "Software"]
+  - name: "Finance"
+    subcategories: ["Bank Fees", "Transfers", "Savings", "Taxes"]
+  - name: "Income"
+    subcategories: ["Salary", "Freelance", "Transfer In"]
+  - name: "Other"
+    subcategories: []
+
+# ─── Pipeline Settings ───────────────────────────────────────────────────────
+pipeline:
+  # Where to store downloaded attachments (relative to project root)
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  # How far back to look for emails on first run (days)
+  initial_lookback_days: 365
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
