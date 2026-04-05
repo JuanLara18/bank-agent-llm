@@ -160,6 +160,28 @@ def db_migrate() -> None:
     raise typer.Exit(1)
 
 
+@db_app.command("purge")
+def db_purge(
+    before: str = typer.Option(..., help="Delete transactions before this date (YYYY-MM-DD)."),
+    confirm: bool = typer.Option(False, "--yes", help="Skip confirmation prompt."),
+) -> None:
+    """Delete all transactions before a given date. [red]Destructive.[/red]"""
+    if not confirm:
+        confirmed = typer.confirm(
+            f"This will permanently delete all transactions before {before}. Continue?",
+            default=False,
+        )
+        if not confirmed:
+            raise typer.Abort()
+    from bank_agent_llm.pipeline import Pipeline
+
+    try:
+        Pipeline().purge(before=before)
+    except NotImplementedError:
+        err_console.print("[yellow]Not yet implemented (M5).[/yellow]")
+        raise typer.Exit(1)
+
+
 @db_app.command("reset")
 def db_reset(
     confirm: bool = typer.Option(False, "--yes", help="Skip confirmation prompt."),
