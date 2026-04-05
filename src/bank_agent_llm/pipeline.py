@@ -120,9 +120,16 @@ class Pipeline:
                     tx_repo = TransactionRepository(session)
                     acc_repo = AccountRepository(session)
 
+                    # Use account_number from first transaction if available,
+                    # fall back to file hash prefix as stable identifier.
+                    extracted_account = (
+                        raw_transactions[0].account_number
+                        if raw_transactions and raw_transactions[0].account_number
+                        else None
+                    )
                     account = acc_repo.get_or_create(
                         bank_name=parser.bank_name,
-                        account_number=file_hash[:16],  # placeholder until parsers extract it
+                        account_number=extracted_account or file_hash[:16],
                     )
 
                     new_count = 0
