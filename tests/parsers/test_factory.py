@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bank_agent_llm.parsers.base import BankParser, RawTransaction
+from bank_agent_llm.parsers.base import BankParser
 from bank_agent_llm.parsers.factory import ParserFactory, UnsupportedBankError
 
 

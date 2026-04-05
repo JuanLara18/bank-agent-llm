@@ -8,7 +8,6 @@ argument parsing, output formatting, and exit codes.
 from __future__ import annotations
 
 import logging
-import sys
 
 import typer
 from rich.console import Console
