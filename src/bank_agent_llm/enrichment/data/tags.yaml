@@ -1,0 +1,124 @@
+# Tag taxonomy for bank-agent-llm
+#
+# Each top-level entry is a "parent tag" used for charts and aggregations.
+# Children are "leaf tags" used for fine-grained filtering.
+#
+# is_expense: false → excluded from spending analysis (payments, income, transfers)
+# color: used by dashboard and visualizations
+# icon: emoji shorthand
+
+tags:
+  - id: comida
+    display: "Alimentación"
+    color: "#F59E0B"
+    icon: "🍽"
+    is_expense: true
+    children:
+      - id: restaurante
+        display: "Restaurantes y Bares"
+      - id: supermercado
+        display: "Supermercados"
+      - id: tienda
+        display: "Tiendas y Minimercados"
+      - id: domicilio
+        display: "Domicilios"
+
+  - id: transporte
+    display: "Transporte"
+    color: "#3B82F6"
+    icon: "🚗"
+    is_expense: true
+    children:
+      - id: uber
+        display: "Uber / Didi"
+      - id: parqueadero
+        display: "Parqueadero"
+      - id: gasolina
+        display: "Gasolina"
+      - id: taxi
+        display: "Taxi"
+
+  - id: entretenimiento
+    display: "Entretenimiento"
+    color: "#8B5CF6"
+    icon: "🎬"
+    is_expense: true
+    children:
+      - id: streaming
+        display: "Streaming"
+      - id: bar
+        display: "Bares y Rumba"
+      - id: eventos
+        display: "Eventos y Cines"
+
+  - id: tech
+    display: "Tech y Software"
+    color: "#06B6D4"
+    icon: "💻"
+    is_expense: true
+    children:
+      - id: software
+        display: "Software / SaaS"
+      - id: telefonia
+        display: "Telefonía y Internet"
+
+  - id: hogar
+    display: "Hogar"
+    color: "#10B981"
+    icon: "🏠"
+    is_expense: true
+    children:
+      - id: servicios-publicos
+        display: "Servicios Públicos"
+      - id: internet-tv
+        display: "Internet / TV"
+      - id: mercado
+        display: "Mercado del Hogar"
+
+  - id: salud
+    display: "Salud"
+    color: "#EF4444"
+    icon: "🏥"
+    is_expense: true
+    children:
+      - id: farmacia
+        display: "Farmacia"
+      - id: medico
+        display: "Médico / Clínica"
+      - id: seguro
+        display: "Seguros de Salud"
+
+  - id: banco
+    display: "Cargos Bancarios"
+    color: "#6B7280"
+    icon: "🏦"
+    is_expense: true
+    children:
+      - id: intereses
+        display: "Intereses"
+      - id: cuota-manejo
+        display: "Cuota de Manejo"
+      - id: seguro-bancario
+        display: "Seguros Bancarios"
+      - id: impuesto-gmf
+        display: "Impuesto GMF 4×1000"
+
+  # ── Non-expense tags (excluded from spending charts) ─────────────────────
+
+  - id: pago-tarjeta
+    display: "Pago a Tarjeta"
+    color: "#22C55E"
+    icon: "↩"
+    is_expense: false
+
+  - id: transferencia
+    display: "Transferencia"
+    color: "#64748B"
+    icon: "↔"
+    is_expense: false
+
+  - id: ingreso
+    display: "Ingreso / Devolución"
+    color: "#22C55E"
+    icon: "↓"
+    is_expense: false

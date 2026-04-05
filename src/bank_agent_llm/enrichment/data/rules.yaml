@@ -1,0 +1,401 @@
+# Keyword rules for transaction tagging.
+#
+# Rules are evaluated top-to-bottom; first match wins.
+# Each rule has:
+#   tags:      list of tags to assign (most specific first, parent tag last if needed)
+#   merchant:  human-readable merchant name
+#   patterns:  list of substrings to match against raw_description (case-insensitive)
+#   direction: optional — only apply to "debit" or "credit" transactions
+#
+# Add your own merchants at the bottom or override this file via config/categories.yaml.
+
+rules:
+
+  # ── Credits (payments / abonos) ──────────────────────────────────────────────
+
+  - tags: [pago-tarjeta]
+    merchant: "Pago a Tarjeta"
+    direction: credit
+    patterns:
+      - "ABONO WOMPI"
+      - "ABONO SUCURSAL"
+      - "ABONO DEBITO"
+      - "ABONO TRANSFERENCIA"
+      - "PAGO TARJETA"
+      - "PPAAGGOO TTAARRJJEETTAA"   # Falabella double-encoded
+      - "PAGO DE TARJETA"
+
+  - tags: [transferencia]
+    merchant: "Transferencia Saliente"
+    direction: credit
+    patterns:
+      - "TRANSF. A"
+      - "TRANSFERENCIA"
+
+  - tags: [ingreso]
+    merchant: "Devolución / Ingreso"
+    direction: credit
+    patterns:
+      - "DEVOLUCION"
+      - "REVERSO"
+      - "INGRESO"
+      - "REEMBOLSO"
+      - "CASHBACK"
+
+  # ── Cargos bancarios (debit — platform fees, taxes) ──────────────────────────
+
+  - tags: [banco, intereses]
+    merchant: "Intereses Corrientes"
+    patterns:
+      - "INTERESES CORRIENTES"
+
+  - tags: [banco, intereses]
+    merchant: "Intereses de Mora"
+    patterns:
+      - "INTERESES MORA"
+      - "INTERESES DE MORA"
+
+  - tags: [banco, cuota-manejo]
+    merchant: "Cuota de Manejo"
+    patterns:
+      - "CUOTA DE MANEJO"
+      - "CUOTA POR EMISION"
+      - "CUOTAS DE MANEJO"
+      - "ADMINISTRACION TARJETA"
+
+  - tags: [banco, impuesto-gmf]
+    merchant: "Impuesto 4×1000"
+    patterns:
+      - "GMF GRAVAMEN"
+      - "GRAVAMEN MOVIMIENTO FINANC"
+
+  - tags: [banco, seguro-bancario]
+    merchant: "Seguro Bancario"
+    patterns:
+      - "POLIZA CARDIF"
+      - "COBRO SEGURO VIDA"
+      - "RECAUDO POLIZA"
+      - "SEGURO VIDA DEUDOR"
+      - "COBRO SEGURO"
+
+  # ── Transporte ────────────────────────────────────────────────────────────────
+
+  - tags: [transporte, uber]
+    merchant: "Uber"
+    patterns:
+      - "UBER RIDES"
+      - "UBER EATS"
+      - "UBER "
+
+  - tags: [transporte, uber]
+    merchant: "Didi"
+    patterns:
+      - "DLO*DIDI"
+      - "DIDI "
+
+  - tags: [transporte, taxi]
+    merchant: "InDriver"
+    patterns:
+      - "INDRIVER"
+
+  - tags: [transporte, parqueadero]
+    merchant: "Parqueadero"
+    patterns:
+      - "PARQUEADERO"
+      - "PARKING"
+      - "APARCAMIENTO"
+
+  - tags: [transporte, gasolina]
+    merchant: "Gasolina / Combustible"
+    patterns:
+      - "GASOLINERA"
+      - "TERPEL"
+      - "BIOMAX"
+      - "PRIMAX"
+      - "PETROBRAS"
+      - "EDS "
+
+  # ── Comida — Restaurantes ─────────────────────────────────────────────────────
+
+  - tags: [comida, restaurante]
+    merchant: "Andrés Carne de Res"
+    patterns:
+      - "ANDRES CARNE DE RES"
+
+  - tags: [comida, restaurante]
+    merchant: "Archie's"
+    patterns:
+      - "ARCHIE S"
+      - "ARCHIES"
+
+  - tags: [comida, restaurante]
+    merchant: "Buffalo Wings"
+    patterns:
+      - "BUFFALO WINGS"
+      - "BW BUFFALO"
+
+  - tags: [comida, restaurante]
+    merchant: "Presto"
+    patterns:
+      - "PRESTO "
+
+  - tags: [comida, restaurante]
+    merchant: "Subway"
+    patterns:
+      - "SUBWAY"
+
+  - tags: [comida, restaurante]
+    merchant: "La Chula"
+    patterns:
+      - "LA CHULA"
+
+  - tags: [comida, restaurante]
+    merchant: "Alitas Paya"
+    patterns:
+      - "ALITAS PAYA"
+
+  - tags: [comida, restaurante]
+    merchant: "McDonald's"
+    patterns:
+      - "MCDONALD"
+      - "MC DONALD"
+
+  - tags: [comida, restaurante]
+    merchant: "Crepes & Waffles"
+    patterns:
+      - "CREPES"
+
+  - tags: [comida, restaurante]
+    merchant: "El Corral"
+    patterns:
+      - "EL CORRAL"
+
+  - tags: [comida, restaurante]
+    merchant: "Papa John's"
+    patterns:
+      - "PAPA JOHN"
+
+  - tags: [comida, restaurante]
+    merchant: "Pizza Hut"
+    patterns:
+      - "PIZZA HUT"
+
+  - tags: [comida, domicilio]
+    merchant: "Rappi"
+    patterns:
+      - "RAPPI"
+      - "RAPPI COL"
+
+  - tags: [comida, domicilio]
+    merchant: "iFood"
+    patterns:
+      - "IFOOD"
+
+  # ── Comida — Supermercados y tiendas ──────────────────────────────────────────
+
+  - tags: [comida, supermercado]
+    merchant: "Éxito"
+    patterns:
+      - "EXITO "
+      - "ALMACENES EXITO"
+
+  - tags: [comida, supermercado]
+    merchant: "Carulla"
+    patterns:
+      - "CARULLA"
+
+  - tags: [comida, supermercado]
+    merchant: "Jumbo"
+    patterns:
+      - "JUMBO "
+
+  - tags: [comida, supermercado]
+    merchant: "Olímpica"
+    patterns:
+      - "OLIMPICA"
+
+  - tags: [comida, supermercado]
+    merchant: "Alkosto"
+    patterns:
+      - "ALKOSTO"
+      - "ALKOMPRAS"
+
+  - tags: [comida, supermercado]
+    merchant: "Metro"
+    patterns:
+      - "SUPERTIENDAS METRO"
+      - "METRO CC"
+
+  - tags: [comida, tienda]
+    merchant: "D1"
+    patterns:
+      - "TIENDA D1"
+      - " D1 "
+
+  - tags: [comida, tienda]
+    merchant: "OXXO"
+    patterns:
+      - "OXXO "
+
+  - tags: [comida, tienda]
+    merchant: "Ara"
+    patterns:
+      - "TIENDAS ARA"
+      - " ARA "
+
+  - tags: [comida, supermercado]
+    merchant: "Supermercado"
+    patterns:
+      - "SUPERMERCADO"
+
+  # ── Entretenimiento — Streaming ───────────────────────────────────────────────
+
+  - tags: [entretenimiento, streaming]
+    merchant: "Netflix"
+    patterns:
+      - "NETFLIX"
+
+  - tags: [entretenimiento, streaming]
+    merchant: "Spotify"
+    patterns:
+      - "SPOTIFY"
+
+  - tags: [entretenimiento, streaming]
+    merchant: "YouTube / Google Play"
+    patterns:
+      - "YOUTUBE"
+      - "GOOGLE *PLAY"
+      - "GOOGLE*PLAY"
+
+  - tags: [entretenimiento, streaming]
+    merchant: "Disney+"
+    patterns:
+      - "DISNEY"
+      - "DISNEY PLUS"
+
+  - tags: [entretenimiento, streaming]
+    merchant: "Prime Video"
+    patterns:
+      - "AMAZON PRIME"
+      - "PRIMEVIDEO"
+
+  - tags: [entretenimiento, streaming]
+    merchant: "Max (HBO)"
+    patterns:
+      - "HBO MAX"
+      - "MAX.COM"
+
+  # ── Tech y Software ───────────────────────────────────────────────────────────
+
+  - tags: [tech, software]
+    merchant: "Cursor AI"
+    patterns:
+      - "CURSOR USAGE"
+      - "CURSOR, AI POWERED"
+      - "CURSOR,AI"
+      - "CURSOR.SH"
+
+  - tags: [tech, software]
+    merchant: "Claude AI"
+    patterns:
+      - "CLAUDE.AI"
+      - "CLAUDE AI"
+
+  - tags: [tech, software]
+    merchant: "Apple"
+    patterns:
+      - "APPLE.COM/BILL"
+      - "APPLE.COM"
+      - "ITUNES"
+      - "APP STORE"
+
+  - tags: [tech, software]
+    merchant: "Microsoft"
+    patterns:
+      - "MICROSOFT"
+      - "MSFT"
+
+  - tags: [tech, software]
+    merchant: "Google"
+    patterns:
+      - "GOOGLE*"
+      - "GOOGLE STORAGE"
+
+  - tags: [tech, software]
+    merchant: "OpenAI"
+    patterns:
+      - "OPENAI"
+
+  # ── Telefonía e Internet ──────────────────────────────────────────────────────
+
+  - tags: [tech, telefonia]
+    merchant: "Movistar"
+    patterns:
+      - "MOVISTAR"
+
+  - tags: [tech, telefonia]
+    merchant: "Claro"
+    patterns:
+      - "CLARO COL"
+      - "AMX COLOMBIA"
+
+  - tags: [tech, telefonia]
+    merchant: "Tigo"
+    patterns:
+      - "TIGO "
+      - "UNE TIGO"
+
+  - tags: [tech, telefonia]
+    merchant: "WOM"
+    patterns:
+      - "WOM COLOMBIA"
+      - " WOM "
+
+  # ── Hogar ─────────────────────────────────────────────────────────────────────
+
+  - tags: [hogar, servicios-publicos]
+    merchant: "Servicios Públicos"
+    patterns:
+      - "EPM "
+      - "EAAB"
+      - "CODENSA"
+      - "GAS NATURAL"
+      - "VANTI"
+      - "EMCALI"
+      - "ACUEDUCTO"
+      - "ELECTRICIDAD"
+
+  - tags: [hogar, internet-tv]
+    merchant: "Internet / TV"
+    patterns:
+      - "PAGOSEPAYCO TV"
+      - "CLARO TV"
+      - "ETB "
+
+  # ── Salud ─────────────────────────────────────────────────────────────────────
+
+  - tags: [salud, farmacia]
+    merchant: "Farmacia / Droguería"
+    patterns:
+      - "DROGUERIA"
+      - "FARMACIA"
+      - "FARMATODO"
+      - "CRUZ VERDE"
+      - "LA REBAJA"
+
+  - tags: [salud, medico]
+    merchant: "Médico / Clínica"
+    patterns:
+      - "CLINICA"
+      - "HOSPITAL"
+      - "MEDICO"
+      - "CONSULTORIO"
+
+  # ── Compra botón PSE (no especificado) ────────────────────────────────────────
+
+  - tags: [transferencia]
+    merchant: "Compra PSE"
+    direction: debit
+    patterns:
+      - "COMPRA BOTON PSE"
+      - "BOTÓN PSE"
