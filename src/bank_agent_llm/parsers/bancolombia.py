@@ -5,15 +5,17 @@ Detects Visa and Mastercard credit card statements.
 
 Row format (word-level extraction grouped by y-position):
     [auth_code?] DD/MM/YYYY  description...  $  amount  [N/M]  $  ...
-    auth_code is a 6-digit number that may or may not be present.
+    auth_code is a 6-character alphanumeric code (e.g. C07817, R02013, 023785).
 
 Payments appear as negative amounts (e.g. ABONO WOMPI/PSE → -2.085.486,00).
+
+Card number encoding: Bancolombia PDFs triple-encode styled text.
+  "***************************111333333222" → un-triple → "***1332"
 """
 
 from __future__ import annotations
 
 import re
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,17 +32,49 @@ from bank_agent_llm.parsers._utils import (
 _BANK_NAME = "Bancolombia"
 _SIGNATURE = "890.903.938-8"
 
-# Regex to detect account/card number from header (e.g. "VISA 1332" or "MASTERCARD 6745")
-_CARD_RE = re.compile(r"(?:VISA|MASTERCARD|DÉBITO)\s+(\d+)", re.IGNORECASE)
-
-# Auth codes are exactly 6 digits
-_AUTH_RE = re.compile(r"^\d{6}$")
+# Auth codes are 6 alphanumeric characters (all caps or digits)
+_AUTH_RE = re.compile(r"^[A-Z0-9]{6}$")
 
 # Amount token: digits with optional periods/commas, optionally negative
 _AMOUNT_RE = re.compile(r"^-?[\d.,]+$")
 
-# Cuotas token: N/M pattern
-_CUOTAS_RE = re.compile(r"^\d+/\d+$")
+# Triple-encoded card tail: groups of 3 identical digits at end of token
+# e.g. "***111333333222" → captures "111333333222" → un-triple → "1332"
+_TRIPLE_DIGITS_RE = re.compile(r"(\d{3,})$")
+
+
+def _untriple(encoded: str) -> str:
+    """Un-triple a sequence of digits encoded in Bancolombia's triple-char style.
+
+    "111333333222" (groups: 111, 333, 333, 222) → "1332"
+    Only works when len(encoded) is divisible by 3 and each group is uniform.
+    Returns empty string if decoding fails.
+    """
+    if len(encoded) % 3 != 0:
+        return ""
+    result = []
+    for i in range(0, len(encoded), 3):
+        chunk = encoded[i : i + 3]
+        if chunk[0] == chunk[1] == chunk[2]:
+            result.append(chunk[0])
+        else:
+            return ""  # not triple-encoded
+    return "".join(result)
+
+
+def _extract_card_digits(tokens: list[str]) -> str | None:
+    """Try to extract the last 4 card digits from a row of Bancolombia tokens.
+
+    Looks for the triple-encoded card number pattern (e.g. "***111333333222").
+    Returns the last 4 actual digits, or None.
+    """
+    for token in tokens:
+        m = _TRIPLE_DIGITS_RE.search(token)
+        if m:
+            decoded = _untriple(m.group(1))
+            if len(decoded) >= 4:
+                return decoded[-4:]
+    return None
 
 
 class BancolombiaParser(BankParser):
@@ -71,12 +105,11 @@ class BancolombiaParser(BankParser):
                     for row in rows:
                         tokens = row_tokens(row)
 
-                        # Extract card number from header rows
-                        line = " ".join(tokens)
+                        # Extract card number from triple-encoded header rows
                         if account_number is None:
-                            m = _CARD_RE.search(line)
-                            if m:
-                                account_number = m.group(1)
+                            candidate = _extract_card_digits(tokens)
+                            if candidate:
+                                account_number = candidate
 
                         tx = _parse_row(tokens, str(file_path), len(transactions))
                         if tx is not None:
@@ -102,7 +135,7 @@ def _parse_row(
         return None
 
     idx = 0
-    # Optional auth code (6 digits) before date
+    # Optional auth code (6-char alphanumeric) before date
     if _AUTH_RE.match(tokens[0]):
         idx = 1
 
@@ -112,9 +145,7 @@ def _parse_row(
     tx_date = parse_date(tokens[idx])
     idx += 1
 
-    # Description: all tokens up to the first "$" sign or amount-like token after a "$"
-    # Structure: description... $ amount [N/M cuotas] [$ amount ...]
-    # Find the "$" separator
+    # Find the "$" separator between description and amount
     dollar_idx = None
     for i in range(idx, len(tokens)):
         if tokens[i] == "$":
@@ -124,9 +155,7 @@ def _parse_row(
     if dollar_idx is None or dollar_idx <= idx:
         return None
 
-    description_tokens = tokens[idx:dollar_idx]
-    description = " ".join(description_tokens).strip()
-
+    description = " ".join(tokens[idx:dollar_idx]).strip()
     if not description:
         return None
 
@@ -144,7 +173,7 @@ def _parse_row(
     except ValueError:
         return None
 
-    # Direction: negative amounts are credits (payments); positive are debits (purchases)
+    # Negative amounts are credits (payments/refunds); positive are debits (purchases)
     if amount < Decimal("0"):
         direction = TransactionDirection.CREDIT
         amount = abs(amount)
