@@ -24,7 +24,7 @@ from bank_agent_llm.enrichment.tags import get_taxonomy
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 15
+BATCH_SIZE = 5
 _TIMEOUT = 120.0  # seconds per batch call
 
 
@@ -100,7 +100,7 @@ class OllamaClient:
             "prompt": prompt,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.1, "num_predict": 512},
+            "options": {"temperature": 0.0, "num_predict": 1024},
         }
 
         try:
@@ -119,63 +119,94 @@ class OllamaClient:
 
     def _build_prompt(self, batch: list[_TxInput]) -> str:
         tag_list = ", ".join(self._taxonomy.all_ids())
-        transactions_json = json.dumps(
-            [{"id": tx.id, "desc": tx.desc, "amount": tx.amount, "direction": tx.direction}
-             for tx in batch],
-            ensure_ascii=False,
-            indent=2,
+        tx_lines = "\n".join(
+            f'{i+1}. id={tx.id} | {tx.direction} | ${tx.amount:,.0f} | {tx.desc}'
+            for i, tx in enumerate(batch)
         )
-        return f"""You are a financial transaction categorizer for a Colombian bank account.
-Assign tags to each transaction using ONLY tags from this list:
-{tag_list}
+        example_id = batch[0].id
+        return f"""Categorize Colombian credit card transactions. Use ONLY these tags: {tag_list}
 
 Rules:
-- Assign 1-3 tags per transaction, most specific first (leaf tag before parent).
-- direction=credit → use pago-tarjeta, transferencia, or ingreso.
-- "INTERESES" → intereses, banco. "GMF"/"GRAVAMEN" → impuesto-gmf, banco.
-- "CUOTA DE MANEJO" → cuota-manejo, banco.
-- For each transaction also provide a clean merchant_name (human-readable, Title Case).
-- Respond ONLY with a valid JSON array. No text before or after.
+- 1-3 tags per transaction, leaf tag first (e.g. "restaurante" before "comida").
+- credit direction → pago-tarjeta (if payment) or ingreso (if salary/transfer in).
+- INTERESES/MORA → intereses, banco. GMF/GRAVAMEN → impuesto-gmf, banco.
+- CUOTA DE MANEJO → cuota-manejo, banco. AMPLIACION → comisiones, banco.
+- merchant: short human-readable name, Title Case. Use brand name if known.
 
 Transactions:
-{transactions_json}
+{tx_lines}
 
-Response format (JSON array, one object per transaction):
-[{{"id": 1, "tags": ["comida", "restaurante"], "merchant": "Archie's"}}]"""
+You MUST respond with a JSON object with key "results" containing an array.
+Each element: {{"id": <number>, "tags": ["tag1", "tag2"], "merchant": "Name"}}
+
+Example: {{"results": [{{"id": {example_id}, "tags": ["comida", "restaurante"], "merchant": "McDonald's"}}]}}"""
 
     def _parse_response(
         self, raw: str, batch: list[_TxInput]
     ) -> dict[int, TagAssignment]:
         raw = raw.strip()
-        # Sometimes the model wraps in ```json ... ```
+
+        # Strip markdown fences
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
+            raw = raw.strip()
 
+        # Parse JSON — tolerate both array and object wrappers
+        items: list[dict[str, Any]] = []
         try:
-            parsed: list[dict[str, Any]] = json.loads(raw)
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                items = parsed
+            elif isinstance(parsed, dict):
+                # {"results": [...]} or {"transactions": [...]}
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        items = v
+                        break
+                if not items:
+                    # {"323": {"tags": [...], "merchant": "..."}, ...}
+                    batch_ids_str = {str(tx.id) for tx in batch}
+                    for k, v in parsed.items():
+                        if k in batch_ids_str and isinstance(v, dict):
+                            v["id"] = int(k)
+                            items.append(v)
         except json.JSONDecodeError:
-            logger.warning("Ollama returned invalid JSON for batch of %d tx: %.200s", len(batch), raw)
-            return {}
-
-        if not isinstance(parsed, list):
-            logger.warning("Ollama response is not a list")
-            return {}
+            # Last resort: extract individual objects with regex
+            import re
+            for m in re.finditer(r'\{[^{}]+\}', raw):
+                try:
+                    obj = json.loads(m.group())
+                    if "id" in obj:
+                        items.append(obj)
+                except json.JSONDecodeError:
+                    pass
+            if not items:
+                logger.warning(
+                    "Ollama: unparseable response for batch of %d tx: %.150s",
+                    len(batch), raw,
+                )
+                return {}
 
         batch_ids = {tx.id for tx in batch}
         results: dict[int, TagAssignment] = {}
 
-        for item in parsed:
+        for item in items:
             tx_id = item.get("id")
+            if not isinstance(tx_id, int):
+                try:
+                    tx_id = int(tx_id)
+                except (TypeError, ValueError):
+                    continue
             if tx_id not in batch_ids:
                 continue
             raw_tags = item.get("tags", [])
             if isinstance(raw_tags, str):
-                raw_tags = [raw_tags]
+                raw_tags = [t.strip() for t in raw_tags.replace(",", " ").split()]
             valid_tags = self._taxonomy.validate(raw_tags)
             if not valid_tags:
-                logger.debug("Ollama assigned no valid tags for tx %s: %s", tx_id, raw_tags)
+                logger.debug("No valid tags for tx %s: %s", tx_id, raw_tags)
                 continue
             results[tx_id] = TagAssignment(
                 tags=valid_tags,

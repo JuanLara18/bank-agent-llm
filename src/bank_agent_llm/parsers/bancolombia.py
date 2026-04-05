@@ -38,6 +38,11 @@ _AUTH_RE = re.compile(r"^[A-Z0-9]{6}$")
 # Amount token: digits with optional periods/commas, optionally negative
 _AMOUNT_RE = re.compile(r"^-?[\d.,]+$")
 
+# Installment indicator: "1/12", "2/6", etc. — appears after the total balance
+# on deferred/restructured purchase rows.  The monthly installment follows in the
+# next "$  amount" pair.
+_INSTALLMENT_RE = re.compile(r"^(\d+)/(\d+)$")
+
 # Triple-encoded card tail: groups of 3 identical digits at end of token
 # e.g. "***111333333222" → captures "111333333222" → un-triple → "1332"
 _TRIPLE_DIGITS_RE = re.compile(r"(\d{3,})$")
@@ -172,6 +177,29 @@ def _parse_row(
         amount = parse_cop(raw_amount_str)
     except ValueError:
         return None
+
+    # ── Installment rows: "N/M  $  cuota_mensual" ─────────────────────────────
+    # Bancolombia deferred purchases show:
+    #   description  $  saldo_total  N/M  $  cuota_mensual  tasa% ...
+    # We want the cuota_mensual (what actually gets charged this month),
+    # not the saldo_total.  We also append "N/M" to the description so each
+    # installment gets a unique description_hash → correct dedup across statements.
+    next_idx = amount_idx + 1
+    if next_idx < len(tokens):
+        inst_match = _INSTALLMENT_RE.match(tokens[next_idx])
+        if inst_match:
+            installment_label = tokens[next_idx]  # e.g. "1/12"
+            # Scan forward for the next "$ amount" pair
+            for j in range(next_idx + 1, len(tokens) - 1):
+                if tokens[j] == "$":
+                    try:
+                        cuota = parse_cop(tokens[j + 1])
+                        if cuota > Decimal("0"):
+                            amount = cuota
+                            description = f"{description} {installment_label}"
+                            break
+                    except ValueError:
+                        pass
 
     # Negative amounts are credits (payments/refunds); positive are debits (purchases)
     if amount < Decimal("0"):
