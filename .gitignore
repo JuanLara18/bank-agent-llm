@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+config/config.yaml
+!config/config.example.yaml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/raw/
+data/processed/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Power BI
+*.pbix
+
+# OS
+Thumbs.db
