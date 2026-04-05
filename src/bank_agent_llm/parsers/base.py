@@ -31,6 +31,8 @@ class RawTransaction:
     transaction_time: time | None = None
     reference: str | None = None
     balance_after: Decimal | None = None
+    # Account identifier extracted by the parser (last 4 digits, full number, etc.)
+    account_number: str | None = None
 
 
 class BankParser(ABC):
