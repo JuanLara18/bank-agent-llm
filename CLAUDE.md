@@ -1,202 +1,132 @@
-# CLAUDE.md — Context for AI Agents
+# CLAUDE.md
 
-This file is the single source of truth for any AI agent (Claude Code, Cursor, etc.) working on this repository.
-Read this file entirely before touching any code.
-
----
-
-## Project Overview
-
-**bank-agent-llm** is a local-first, privacy-focused financial intelligence pipeline.
-
-It automatically:
-1. Fetches bank statements (PDFs/Excel) from one or more email accounts via IMAP
-2. Detects which bank each statement belongs to and parses it accordingly (Factory pattern)
-3. Normalizes and stores all transactions in a local SQLite database
-4. Uses a local LLM via **Ollama** to categorize raw transaction descriptions
-5. Exposes the database for **Power BI** dashboards
-6. Allows natural-language querying of the data via **Chat-to-SQL** (Ollama + local DB)
-
-**Key principle:** All processing is 100% local. No financial data ever leaves the user's machine.
+Read this file before touching any code. For architecture diagrams and the data model see `docs/architecture.md`.
 
 ---
 
-## Architecture
+## What this project does
 
-```
-bank-agent-llm/
-├── src/
-│   ├── ingestion/       # Email connection, attachment download, deduplication
-│   ├── parsers/         # Factory pattern: one parser class per bank
-│   ├── enrichment/      # Ollama integration for transaction categorization
-│   ├── storage/         # Database models, migrations, repository layer
-│   └── chat/            # Chat-to-SQL interface using Ollama
-├── config/
-│   └── config.example.yaml   # Template (never commit the real config.yaml)
-├── data/                # gitignored — raw attachments and processed outputs
-│   ├── raw/
-│   └── processed/
-├── tests/               # Mirrors src/ structure
-├── docs/                # Architecture decisions, setup guides, roadmap
-├── scripts/             # One-off or utility scripts
-└── .github/             # Issue templates, PR template
-```
+**bank-agent-llm** is a local-first Python library and CLI tool that:
+1. Imports bank statement files (PDF/XLSX) from a local path or IMAP email accounts
+2. Detects the bank and parses each statement with the correct parser (Factory pattern)
+3. Stores all transactions in a single SQLite/PostgreSQL database
+4. Categorizes transaction descriptions using a local LLM via Ollama (optional — rules engine runs first)
+5. Exposes data via a terminal dashboard, Power BI, and a natural-language CLI chat interface
 
-### Module Responsibilities
+All processing is local. No financial data reaches any external API.
+
+---
+
+## Module responsibilities
 
 | Module | Responsibility |
 |--------|---------------|
-| `ingestion` | IMAP connection to multiple email accounts, download new attachments, track already-processed emails (never re-process) |
-| `parsers` | Abstract `BankParser` base class + concrete implementations per bank. A `ParserFactory` receives a file and returns the right parser. |
-| `enrichment` | Sends raw transaction descriptions to a local Ollama model for category classification. Handles batching and caching. |
-| `storage` | SQLAlchemy models, Alembic migrations. Single repository class per entity. No raw SQL outside this module. |
-| `chat` | LangChain or direct Ollama API for Text-to-SQL. Reads schema, generates SQL, executes, returns natural language answer. |
+| `pipeline.py` | Public library API — orchestrates all stages. CLI delegates here. |
+| `cli.py` | Typer CLI — argument parsing, output formatting, exit codes only. No business logic. |
+| `ingestion/` | IMAP client, attachment download, deduplication via `processed_emails` table |
+| `parsers/` | `BankParser` base, `ParserFactory` (hint optimization), one file per bank |
+| `enrichment/` | Rules engine (fast) → Ollama fallback (optional). Category cache. |
+| `storage/` | SQLAlchemy models, Alembic migrations, repository classes |
+| `chat/` | Read-only Text-to-SQL via Ollama — schema injection, query preview, execution |
 
 ---
 
-## Technology Stack
+## Technology stack
 
-- **Language:** Python 3.11+
-- **Package manager:** `uv` (fast, modern — preferred over pip)
-- **Database:** SQLite (default) — can be swapped for PostgreSQL via config
-- **ORM:** SQLAlchemy 2.x + Alembic for migrations
-- **AI/LLM:** Ollama (local) — default models: `llama3.2` for categorization, `phi3` for chat
-- **PDF parsing:** `pdfplumber` (primary), `PyPDF2` (fallback)
-- **Email:** `imaplib` + `email` stdlib, wrapped in a clean IMAP client
-- **Config:** Pydantic Settings v2 — reads from `config/config.yaml` + `.env`
-- **Testing:** `pytest` + `pytest-cov`
-- **Linting:** `ruff` (linter + formatter)
-- **Type checking:** `mypy`
-
----
-
-## Design Patterns & Conventions
-
-### Factory Pattern for Parsers
-Every bank has its own parser class in `src/parsers/`. Adding support for a new bank means:
-1. Create `src/parsers/my_bank.py` with a class extending `BankParser`
-2. Register it in `src/parsers/factory.py`
-3. Add its detection logic (by email sender or PDF text signature)
-4. Write tests in `tests/parsers/test_my_bank.py`
-
-Never modify existing parsers to add a new bank — always add a new file.
-
-### Configuration
-All user-specific settings live in `config/config.yaml` (gitignored).
-`config/config.example.yaml` is the documented template committed to the repo.
-Code reads config via `src/config.py` using Pydantic Settings — never read env vars or files directly in business logic.
-
-### Database
-- All DB access goes through the repository layer in `src/storage/`
-- Migrations are managed with Alembic — never alter the schema manually
-- Transaction deduplication is handled by a unique constraint on `(bank_id, date, amount, description_hash)`
-
-### Testing
-- Unit tests mock external dependencies (IMAP, Ollama HTTP calls)
-- At least one integration test per parser using a real (anonymized) sample PDF in `tests/fixtures/`
-- Run tests: `pytest`
-- Coverage target: 80%+
+| Concern | Library |
+|---------|---------|
+| CLI | `typer` + `rich` |
+| Config | `pydantic-settings` v2 + custom YAML loader (see Configuration section) |
+| Email | `imapclient` |
+| PDF | `pdfplumber` |
+| Spreadsheet | `openpyxl` |
+| ORM | `sqlalchemy` 2.x |
+| Migrations | `alembic` |
+| LLM | `httpx` → Ollama REST API |
+| Resilience | `tenacity` |
+| Packaging | `uv` + `hatchling` |
+| Testing | `pytest` + `pytest-httpx` |
+| Linting | `ruff` |
+| Types | `mypy` strict |
 
 ---
 
-## Branch Strategy
+## CLI commands
+
+```
+bank-agent run              Full pipeline: fetch → parse → enrich → store
+bank-agent import <path>    Import statement files from a local path (primary method)
+bank-agent fetch            Download new statements from email accounts
+bank-agent parse            Parse downloaded files in data/raw/
+bank-agent enrich           Categorise transactions via Ollama
+bank-agent status           Terminal dashboard summary
+bank-agent chat             Natural-language query session (read-only)
+bank-agent config-check     Validate configuration file
+bank-agent db migrate       Apply pending Alembic migrations
+bank-agent db purge         Delete transactions before a given date
+bank-agent db reset         Drop and recreate the database
+bank-agent --version        Print version
+```
+
+---
+
+## Adding a new bank parser
+
+1. Create `src/bank_agent_llm/parsers/<bank_slug>.py` extending `BankParser`
+2. Implement `bank_name`, `can_parse(file_path, *, hint="")`, and `parse()`
+3. Register in `src/bank_agent_llm/parsers/factory.py`
+4. Add anonymized sample PDF to `tests/fixtures/`
+5. Write tests in `tests/parsers/test_<bank_slug>.py`
+
+Full guide: `docs/adding-a-parser.md`
+
+---
+
+## Configuration
+
+Config lives in `config/config.yaml` (gitignored). Template: `config/config.example.yaml`.
+
+`config.yaml` uses `${ENV_VAR}` tokens for secrets. **pydantic-settings does not expand these natively from YAML** — the config loader in `src/bank_agent_llm/config.py` applies `os.path.expandvars` to the raw YAML string before parsing. Actual secret values belong in `.env`, which is also gitignored.
+
+---
+
+## Database
+
+- All DB access via the repository layer (`src/storage/`)
+- Schema changes via Alembic only
+- Unique constraint on transactions: `(account_id, date, amount, description_hash, position_in_statement)`
+- Chat interface always uses a **read-only** SQLAlchemy connection — never write access from chat
+
+---
+
+## Branch and commit conventions
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Always deployable. Protected. Only merges from `develop` via PR. |
-| `develop` | Integration branch. Feature branches merge here first. |
-| `feature/<name>` | New functionality (e.g., `feature/bancolombia-parser`) |
-| `fix/<name>` | Bug fixes (e.g., `fix/imap-reconnect`) |
-| `docs/<name>` | Documentation only (e.g., `docs/setup-guide`) |
-| `chore/<name>` | Tooling, deps, config (e.g., `chore/add-ruff`) |
+| `main` | Stable releases only — merge from `develop` at milestone close |
+| `develop` | Integration branch |
+| `feature/<name>` | New functionality |
+| `fix/<name>` | Bug fixes |
+| `docs/<name>` | Documentation only |
+| `chore/<name>` | Tooling, deps, config |
+| `refactor/<name>` | Behaviour-neutral code changes |
 
-**PR rules:**
-- Every PR must reference a GitHub Issue
-- PR title format: `feat: add Bancolombia parser (#12)`
-- Squash merge into `develop`, merge commit into `main`
-- No force-push to `main` or `develop`
+Commit format: `type: short description` — types: `feat fix docs chore test refactor`
 
 ---
 
-## Commit Convention
+## What NOT to do
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-feat: add IMAP attachment downloader
-fix: handle empty PDF pages in parser
-docs: add architecture diagram
-chore: add ruff linting config
-test: add unit tests for ParserFactory
-refactor: extract deduplication logic to storage module
-```
-
----
-
-## What NOT to Do
-
-- Do NOT commit `config/config.yaml`, `.env`, or any file with credentials
-- Do NOT put business logic in `scripts/` — it belongs in `src/`
-- Do NOT skip migrations — always use Alembic to change the schema
-- Do NOT call Ollama directly from parsers or ingestion — only through `enrichment/`
-- Do NOT add a new bank by modifying an existing parser file
-- Do NOT use `print()` for logging — use the `logging` stdlib module
-- Do NOT store raw PDFs in git — they go in `data/raw/` (gitignored)
+- Do not commit `config/config.yaml`, `.env`, or any file with credentials
+- Do not put business logic in `cli.py` — it belongs in `pipeline.py` or a module
+- Do not call Ollama directly outside `src/enrichment/` and `src/chat/`
+- Do not skip the rules engine — LLM enrichment is a fallback, not the first step
+- Do not modify an existing parser to add a new bank — always add a new file
+- Do not bypass Alembic to change the schema
+- Do not allow write SQL from the chat interface — always use a read-only connection
+- Do not use `print()` — use `logging` in library code, `rich` in CLI code
+- Do not store PDFs in git — they belong in `data/raw/` (gitignored)
 
 ---
 
-## Development Phases (Roadmap)
-
-Track progress in GitHub Issues with the milestones below.
-
-| Milestone | Description |
-|-----------|-------------|
-| **M1: Foundation** | Repo setup, CI, config system, DB schema, base classes |
-| **M2: Ingestion** | IMAP client, attachment download, deduplication |
-| **M3: First Parser** | ParserFactory + first bank implementation |
-| **M4: Enrichment** | Ollama categorization pipeline |
-| **M5: Visualization** | Power BI connection guide + sample dashboard |
-| **M6: Chat** | Chat-to-SQL local interface |
-| **M7: Portability** | Docker, one-command setup, full user documentation |
-
----
-
-## Running Locally
-
-```bash
-# 1. Clone and enter
-git clone https://github.com/<user>/bank-agent-llm.git
-cd bank-agent-llm
-
-# 2. Install uv (if not installed)
-pip install uv
-
-# 3. Create environment and install deps
-uv sync
-
-# 4. Copy config template and fill in your data
-cp config/config.example.yaml config/config.yaml
-
-# 5. Run DB migrations
-uv run alembic upgrade head
-
-# 6. Run the pipeline
-uv run python -m bank_agent_llm.main
-```
-
----
-
-## Key Files to Know
-
-| File | Purpose |
-|------|---------|
-| `src/config.py` | Pydantic Settings — single entry point for all config |
-| `src/parsers/base.py` | Abstract `BankParser` class — all parsers extend this |
-| `src/parsers/factory.py` | `ParserFactory` — maps files to their parser class |
-| `src/storage/models.py` | SQLAlchemy models |
-| `src/storage/migrations/` | Alembic migration files |
-| `config/config.example.yaml` | Documented config template |
-
----
-
-*This file should be updated whenever a new module is added, a design decision is made, or the architecture changes.*
+*Update this file when a module is added, a dependency changes, or an architectural decision is made.*

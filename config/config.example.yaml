@@ -1,78 +1,84 @@
-# bank-agent-llm Configuration Template
-# Copy this file to config/config.yaml and fill in your values.
-# NEVER commit config.yaml — it contains credentials.
+# bank-agent-llm — Configuration Template
+#
+# Copy to config/config.yaml and fill in the values marked with <required>.
+# Sensitive values (passwords) should be set as environment variables and
+# referenced here as ${ENV_VAR_NAME} — never written as plain text.
+#
+# Create a .env file in the project root for local development:
+#   EMAIL_PERSONAL_PASS=...
+#   EMAIL_WORK_PASS=...
 
 # ─── Database ────────────────────────────────────────────────────────────────
 database:
-  # SQLite (default, zero-setup):
+  # SQLite — default, zero setup, works with Power BI via ODBC
   url: "sqlite:///data/bank_agent.db"
-  # PostgreSQL (optional, for power users):
-  # url: "postgresql://user:password@localhost:5432/bank_agent"
+  # PostgreSQL — uncomment to switch
+  # url: "postgresql://${DB_USER}:${DB_PASS}@localhost:5432/bank_agent"
 
-# ─── Email Accounts ──────────────────────────────────────────────────────────
-# Add as many accounts as you need.
+# ─── Email accounts ──────────────────────────────────────────────────────────
+# Add one entry per inbox. All accounts are processed on each run.
 email_accounts:
-  - name: "personal"           # Friendly name (used in logs)
-    imap_host: "imap.gmail.com"
+  - name: personal                        # Identifier used in logs and DB
+    imap_host: imap.gmail.com
     imap_port: 993
     use_ssl: true
-    username: "your@gmail.com"
-    # Use app password for Gmail (not your regular password)
-    # Store actual value in .env as EMAIL_PERSONAL_PASSWORD
-    password: "${EMAIL_PERSONAL_PASSWORD}"
-    # Only look in these folders (leave empty to search all)
-    folders: ["INBOX", "Extractos"]
-    # Keywords to filter emails (subject contains any of these)
-    subject_keywords: ["extracto", "estado de cuenta", "resumen"]
+    username: ${EMAIL_PERSONAL_USER}      # <required> — set in .env
+    password: ${EMAIL_PERSONAL_PASS}      # <required> — use an app password
+    folders:
+      - INBOX
+    subject_keywords:
+      - extracto
+      - estado de cuenta
+      - resumen de cuenta
+      - bank statement
 
-  # - name: "work"
-  #   imap_host: "outlook.office365.com"
+  # Second account — uncomment and fill in to add another inbox
+  # - name: work
+  #   imap_host: outlook.office365.com
   #   imap_port: 993
   #   use_ssl: true
-  #   username: "your@company.com"
-  #   password: "${EMAIL_WORK_PASSWORD}"
+  #   username: ${EMAIL_WORK_USER}
+  #   password: ${EMAIL_WORK_PASS}
+  #   folders:
+  #     - INBOX
 
-# ─── Ollama (Local LLM) ──────────────────────────────────────────────────────
+# ─── Ollama ──────────────────────────────────────────────────────────────────
 ollama:
   base_url: "http://localhost:11434"
-  # Model for transaction categorization (fast, small)
-  categorization_model: "llama3.2"
-  # Model for chat-to-SQL queries (can be larger)
-  chat_model: "llama3.2"
-  # Max tokens per categorization request
-  max_tokens: 100
+  # Model used to categorize transaction descriptions — smaller = faster
+  categorization_model: llama3.2
+  # Model used for the chat / Text-to-SQL interface — can be larger
+  chat_model: llama3.2
 
 # ─── Categories ──────────────────────────────────────────────────────────────
-# Define the categories your LLM will use for classification.
-# You can customize these to match your spending habits.
+# The LLM picks from this list. Customize to match your spending habits.
+# Subcategories are optional but improve classification accuracy.
 categories:
-  - name: "Food & Dining"
-    subcategories: ["Restaurants", "Groceries", "Coffee", "Food Delivery"]
-  - name: "Transport"
-    subcategories: ["Fuel", "Rideshare (Uber/InDrive)", "Public Transit", "Parking", "Car Maintenance"]
-  - name: "Housing"
-    subcategories: ["Rent", "Utilities (Water/Gas/Electric)", "Internet", "Home Supplies"]
-  - name: "Health"
-    subcategories: ["Pharmacy", "Doctor/Clinic", "Gym", "Insurance"]
-  - name: "Entertainment"
-    subcategories: ["Streaming", "Events", "Hobbies"]
-  - name: "Shopping"
-    subcategories: ["Clothing", "Electronics", "Online Shopping"]
-  - name: "Education"
-    subcategories: ["Books", "Courses", "Software"]
-  - name: "Finance"
-    subcategories: ["Bank Fees", "Transfers", "Savings", "Taxes"]
-  - name: "Income"
-    subcategories: ["Salary", "Freelance", "Transfer In"]
-  - name: "Other"
+  - name: Food & Dining
+    subcategories: [Restaurants, Groceries, Coffee, Food Delivery]
+  - name: Transport
+    subcategories: [Fuel, Rideshare, Public Transit, Parking, Car Maintenance]
+  - name: Housing
+    subcategories: [Rent, Utilities, Internet, Home Supplies]
+  - name: Health
+    subcategories: [Pharmacy, Doctor, Gym, Insurance]
+  - name: Entertainment
+    subcategories: [Streaming, Events, Hobbies]
+  - name: Shopping
+    subcategories: [Clothing, Electronics, Online Shopping]
+  - name: Education
+    subcategories: [Books, Courses, Software]
+  - name: Finance
+    subcategories: [Bank Fees, Transfers, Savings, Taxes]
+  - name: Income
+    subcategories: [Salary, Freelance, Transfer In]
+  - name: Other
     subcategories: []
 
-# ─── Pipeline Settings ───────────────────────────────────────────────────────
+# ─── Pipeline ────────────────────────────────────────────────────────────────
 pipeline:
-  # Where to store downloaded attachments (relative to project root)
-  raw_data_dir: "data/raw"
-  processed_data_dir: "data/processed"
-  # How far back to look for emails on first run (days)
+  raw_data_dir: data/raw
+  processed_data_dir: data/processed
+  # How far back to look for emails on the very first run
   initial_lookback_days: 365
-  # Log level: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
+  log_level: INFO          # DEBUG | INFO | WARNING | ERROR

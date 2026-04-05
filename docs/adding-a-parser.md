@@ -13,58 +13,73 @@ Open a sample PDF (or XLS) from the bank. Note:
 
 ## Step 2: Create the parser file
 
-Create `src/parsers/<bank_slug>.py`:
+Create `src/bank_agent_llm/parsers/<bank_slug>.py`:
 
 ```python
 from pathlib import Path
-from src.parsers.base import BankParser
-from src.storage.models import Transaction
+
 import pdfplumber
+
+from bank_agent_llm.parsers.base import BankParser, RawTransaction, TransactionDirection
 
 
 class MyBankParser(BankParser):
     """Parser for MyBank PDF statements."""
 
-    BANK_NAME = "MyBank"
-    # Text that uniquely identifies this bank's PDFs
+    # Text that uniquely identifies this bank's PDFs (first-page signature)
     SIGNATURE = "MYBANK S.A."
 
-    def can_parse(self, file_path: Path) -> bool:
-        """Return True if this file belongs to MyBank."""
+    @property
+    def bank_name(self) -> str:
+        return "MyBank"
+
+    def can_parse(self, file_path: Path, *, hint: str = "") -> bool:
+        """Return True if this file belongs to MyBank.
+
+        Uses the pre-extracted hint text when available to avoid
+        reopening the PDF (ParserFactory handles extraction).
+        """
         if file_path.suffix.lower() != ".pdf":
             return False
-        with pdfplumber.open(file_path) as pdf:
-            first_page_text = pdf.pages[0].extract_text() or ""
-            return self.SIGNATURE in first_page_text.upper()
+        text = hint or self._first_page_text(file_path)
+        return self.SIGNATURE in text.upper()
 
-    def parse(self, file_path: Path) -> list[Transaction]:
+    def parse(self, file_path: Path) -> list[RawTransaction]:
         """Extract transactions from the PDF."""
         transactions = []
         with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                # Extract the transaction table
+            for page_num, page in enumerate(pdf.pages):
                 tables = page.extract_tables()
                 for table in tables:
-                    for row in table:
-                        tx = self._parse_row(row)
+                    for row_idx, row in enumerate(table):
+                        tx = self._parse_row(
+                            row,
+                            source_file=str(file_path),
+                            position=page_num * 1000 + row_idx,
+                        )
                         if tx:
                             transactions.append(tx)
         return transactions
 
-    def _parse_row(self, row: list) -> Transaction | None:
-        # Parse each row into a Transaction object
-        # Return None for header rows or empty rows
+    def _first_page_text(self, file_path: Path) -> str:
+        with pdfplumber.open(file_path) as pdf:
+            return pdf.pages[0].extract_text() or "" if pdf.pages else ""
+
+    def _parse_row(
+        self, row: list[str | None], source_file: str, position: int
+    ) -> RawTransaction | None:
+        # Parse each row — return None for header or empty rows
         ...
 ```
 
 ## Step 3: Register in the factory
 
-Open `src/parsers/factory.py` and add your parser to the list:
+Open `src/bank_agent_llm/parsers/factory.py` and add your parser:
 
 ```python
-from src.parsers.my_bank import MyBankParser
+from bank_agent_llm.parsers.my_bank import MyBankParser
 
-_PARSERS = [
+_PARSERS: list[BankParser] = [
     ExistingBankParser(),
     MyBankParser(),   # add here
 ]
@@ -76,26 +91,36 @@ Create `tests/parsers/test_my_bank.py`:
 
 ```python
 from pathlib import Path
-from src.parsers.my_bank import MyBankParser
 
-FIXTURE_PATH = Path("tests/fixtures/my_bank_sample.pdf")
+import pytest
 
-def test_can_parse_returns_true_for_mybank_pdf():
+from bank_agent_llm.parsers.my_bank import MyBankParser
+
+FIXTURE = Path("tests/fixtures/my_bank_sample.pdf")
+
+
+def test_can_parse_returns_true_for_mybank_pdf() -> None:
+    assert MyBankParser().can_parse(FIXTURE)
+
+
+def test_can_parse_uses_hint_without_opening_file() -> None:
     parser = MyBankParser()
-    assert parser.can_parse(FIXTURE_PATH)
+    # hint contains the signature — file path is irrelevant
+    assert parser.can_parse(Path("any.pdf"), hint="MYBANK S.A. ACCOUNT SUMMARY")
 
-def test_parse_returns_expected_transactions():
-    parser = MyBankParser()
-    transactions = parser.parse(FIXTURE_PATH)
+
+def test_parse_returns_expected_transactions() -> None:
+    transactions = MyBankParser().parse(FIXTURE)
     assert len(transactions) > 0
     assert transactions[0].amount is not None
     assert transactions[0].date is not None
+    assert transactions[0].position_in_statement >= 0
 ```
 
 Add an **anonymized** sample PDF to `tests/fixtures/my_bank_sample.pdf`.
-Anonymized means: real structure, dummy amounts and names.
+Anonymized means: real PDF structure, dummy amounts and personal data.
 
-## Step 5: Run the test suite
+## Step 5: Run the tests
 
 ```bash
 pytest tests/parsers/test_my_bank.py -v
@@ -104,5 +129,5 @@ pytest tests/parsers/test_my_bank.py -v
 ## Step 6: Open a PR
 
 - Branch: `feature/my-bank-parser`
-- PR title: `feat: add MyBank statement parser (#<issue>)`
-- PR into `develop`
+- PR title: `feat: add MyBank parser (#<issue>)`
+- PR target: `develop`
