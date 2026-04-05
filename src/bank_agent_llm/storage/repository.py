@@ -19,6 +19,7 @@ from bank_agent_llm.storage.models import (
     Account,
     Category,
     FileProcessingRun,
+    MerchantCache,
     PipelineRun,
     ProcessedEmail,
     Transaction,
@@ -223,3 +224,75 @@ class PipelineRunRepository:
     def latest(self) -> PipelineRun | None:
         stmt = select(PipelineRun).order_by(PipelineRun.started_at.desc()).limit(1)
         return self._s.execute(stmt).scalar_one_or_none()
+
+
+# ─── Enrichment ───────────────────────────────────────────────────────────────
+
+class EnrichmentRepository:
+    """Data access for the enrichment layer (tags + merchant cache)."""
+
+    def __init__(self, session: Session) -> None:
+        self._s = session
+
+    def pending_transactions(
+        self, *, include_tagged: bool = False
+    ) -> list[Transaction]:
+        """Return transactions that need enrichment.
+
+        By default only tag_source='pending'. With include_tagged=True also
+        returns previously tagged transactions (for re-runs), never manual ones.
+        """
+        if include_tagged:
+            stmt = select(Transaction).where(Transaction.tag_source != "manual")
+        else:
+            stmt = select(Transaction).where(Transaction.tag_source == "pending")
+        return list(self._s.execute(stmt).scalars().all())
+
+    def save_tags(
+        self,
+        transaction_id: int,
+        tags: list[str],
+        merchant_name: str | None,
+        source: str,
+    ) -> None:
+        tx = self._s.get(Transaction, transaction_id)
+        if tx is None:
+            return
+        tx.tags = tags
+        tx.tag_source = source
+        if merchant_name:
+            tx.merchant_name = merchant_name
+        self._s.flush()
+
+    def get_merchant_cache(self, merchant_key: str) -> MerchantCache | None:
+        stmt = select(MerchantCache).where(MerchantCache.merchant_key == merchant_key)
+        cached = self._s.execute(stmt).scalar_one_or_none()
+        if cached:
+            cached.hit_count += 1
+            self._s.flush()
+        return cached
+
+    def upsert_merchant_cache(
+        self,
+        merchant_key: str,
+        tags: list[str],
+        merchant_name: str,
+        source: str,
+    ) -> None:
+        existing = self._s.execute(
+            select(MerchantCache).where(MerchantCache.merchant_key == merchant_key)
+        ).scalar_one_or_none()
+
+        if existing:
+            existing.tags = tags
+            existing.merchant_name = merchant_name
+            existing.source = source
+            existing.hit_count += 1
+        else:
+            self._s.add(MerchantCache(
+                merchant_key=merchant_key,
+                tags=tags,
+                merchant_name=merchant_name,
+                source=source,
+            ))
+        self._s.flush()
