@@ -191,10 +191,20 @@ def config_check(
 # ─── DB sub-commands ─────────────────────────────────────────────────────────
 
 @db_app.command("migrate")
-def db_migrate() -> None:
+def db_migrate(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
+) -> None:
     """Apply pending Alembic database migrations."""
-    err_console.print("[yellow]Not yet implemented (M1).[/yellow]")
-    raise typer.Exit(1)
+    from alembic import command as alembic_command
+    from alembic.config import Config as AlembicConfig
+
+    alembic_cfg = AlembicConfig("alembic.ini")
+    try:
+        alembic_command.upgrade(alembic_cfg, "head")
+        console.print("[green]Database migrations applied.[/green]")
+    except Exception as exc:
+        err_console.print(f"[red]Migration failed: {exc}[/red]")
+        raise typer.Exit(1)
 
 
 @db_app.command("purge")
@@ -222,14 +232,28 @@ def db_purge(
 @db_app.command("reset")
 def db_reset(
     confirm: bool = typer.Option(False, "--yes", help="Skip confirmation prompt."),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
 ) -> None:
     """Drop and recreate the database. [red]Destructive.[/red]"""
     if not confirm:
-        confirmed = typer.confirm("This will delete all data. Continue?", default=False)
-        if not confirmed:
+        if not typer.confirm("This will delete all data. Continue?", default=False):
             raise typer.Abort()
-    err_console.print("[yellow]Not yet implemented (M1).[/yellow]")
-    raise typer.Exit(1)
+
+    from alembic import command as alembic_command
+    from alembic.config import Config as AlembicConfig
+
+    from bank_agent_llm.storage.database import get_engine
+    from bank_agent_llm.storage.models import Base
+
+    try:
+        engine = get_engine()
+        Base.metadata.drop_all(engine)
+        alembic_cfg = AlembicConfig("alembic.ini")
+        alembic_command.upgrade(alembic_cfg, "head")
+        console.print("[green]Database reset and recreated.[/green]")
+    except Exception as exc:
+        err_console.print(f"[red]Reset failed: {exc}[/red]")
+        raise typer.Exit(1)
 
 
 # ─── Version ─────────────────────────────────────────────────────────────────
