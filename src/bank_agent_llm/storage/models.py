@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -99,6 +100,10 @@ class Transaction(Base):
     source_file: Mapped[str] = mapped_column(Text, nullable=False)
     description_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     position_in_statement: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Enrichment fields — populated by bank-agent enrich
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    tag_source: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    merchant_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     account: Mapped[Account] = relationship("Account", back_populates="transactions")
@@ -140,6 +145,24 @@ class FileProcessingRun(Base):
         primaryjoin="foreign(Transaction.source_file) == FileProcessingRun.file_path",
         viewonly=True,
     )
+
+
+class MerchantCache(Base):
+    """Cache of Ollama-assigned tags per merchant key.
+
+    Avoids calling Ollama twice for the same merchant description.
+    ``merchant_key`` is the normalized (uppercased, stripped) raw_description.
+    """
+
+    __tablename__ = "merchant_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False)
+    merchant_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)  # llm | manual
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class PipelineRun(Base):
