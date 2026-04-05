@@ -87,7 +87,10 @@ def fetch(
             seen.add_column("Asunto", max_width=55)
             seen.add_column("Fecha", max_width=30)
             for p in result.discovered_patterns:
-                seen.add_row(p["sender"][:45], p["subject"][:55], p["date"][:25])
+                # Strip non-cp1252 chars for Windows terminal compatibility
+                def _safe(s: str, n: int) -> str:
+                    return s.encode("cp1252", errors="replace").decode("cp1252")[:n]
+                seen.add_row(_safe(p["sender"], 45), _safe(p["subject"], 55), _safe(p["date"], 25))
             console.print(seen)
             console.print(
                 f"\n[dim]Correos con adjunto escaneados: {result.emails_scanned}[/dim]"

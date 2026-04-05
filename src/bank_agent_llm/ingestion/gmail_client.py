@@ -33,6 +33,8 @@ _WANTED_EXTENSIONS = {".pdf", ".xlsx", ".xls"}
 # Known bank sender patterns (substring match, case-insensitive)
 _BANK_SENDER_HINTS = [
     "bancolombia",
+    "extractosbancolombia",
+    "extractos.documentosbancolombia",
     "falabella",
     "scotiabank",
     "davibank",
@@ -42,22 +44,17 @@ _BANK_SENDER_HINTS = [
     "bbva",
     "itau",
     "occidente",
-    "bogota",
-    "popular",
-    "extracto",
     "mensajeria@",
     "notificaciones@",
-    "tarjeta",
 ]
 
 # Subject keywords that indicate a bank statement
 _SUBJECT_HINTS = [
-    "extracto",
+    "extracto del mes",
     "estado de cuenta",
     "resumen de cuenta",
-    "movimientos",
-    "factura",
-    "cobro",
+    "extracto de tarjeta",
+    "extracto de cuenta",
 ]
 
 
@@ -141,7 +138,11 @@ class GmailClient:
                     "Selecciona tu cuenta %s y haz clic en 'Permitir'.\n",
                     self._account_name,
                 )
-                creds = flow.run_local_server(port=0, open_browser=True)
+                creds = flow.run_local_server(
+                    port=0,
+                    open_browser=True,
+                    timeout_seconds=300,
+                )
 
             self._token_path.write_text(creds.to_json(), encoding="utf-8")
             logger.info("Token guardado en %s", self._token_path)

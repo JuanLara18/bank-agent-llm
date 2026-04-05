@@ -1,19 +1,39 @@
 # CLAUDE.md
 
-Read this file before touching any code. For architecture diagrams and the data model see `docs/architecture.md`.
+Read this file before touching any code. For architecture and data model see `docs/architecture.md`. For milestone status see `docs/roadmap.md`.
 
 ---
 
 ## What this project does
 
 **bank-agent-llm** is a local-first Python library and CLI tool that:
-1. Imports bank statement files (PDF/XLSX) from a local path or IMAP email accounts
-2. Detects the bank and parses each statement with the correct parser (Factory pattern)
-3. Stores all transactions in a single SQLite/PostgreSQL database
-4. Categorizes transaction descriptions using a local LLM via Ollama (optional — rules engine runs first)
-5. Exposes data via a terminal dashboard, Power BI, and a natural-language CLI chat interface
+1. Downloads bank statement PDFs from Gmail (OAuth2) and Outlook (IMAP)
+2. Also imports files from a local path — primary method for initial load
+3. Detects the bank and parses each statement with the correct parser (Factory pattern)
+4. Stores all transactions in a SQLite database (PostgreSQL-ready)
+5. Categorizes transactions using a keyword rules engine (99%+ coverage) with Ollama as optional fallback
+6. Displays a Rich terminal dashboard with spending by category, merchant, month, and day of week
+7. Exposes data via a future web dashboard (Streamlit, M7) and natural-language chat (Ollama, M8)
 
 All processing is local. No financial data reaches any external API.
+
+---
+
+## Current state (as of 2026-04-05)
+
+| Milestone | Status | Key deliverable |
+|-----------|--------|-----------------|
+| M1 Foundation | ✅ Done | CLI skeleton, DB, config |
+| M2 File Import | ✅ Done | `bank-agent import <path>` |
+| M3 First Parsers | ✅ Done | Bancolombia, Falabella CMR, Scotiabank/DaviBank |
+| M4 Enrichment | ✅ Done | Rules engine 99.3% coverage, Ollama fallback |
+| M5 Email Ingestion | ✅ Done | Gmail OAuth2 + Outlook IMAP |
+| M6 Status Dashboard | ✅ Done | `bank-agent status` Rich terminal report |
+| M7 Web Dashboard | 🔜 Next | Streamlit `bank-agent dashboard` |
+| M8 Chat | 🔜 | `bank-agent chat` (requires Ollama) |
+| M9 Portability | 🔜 | Docker, Makefile, docs |
+
+**Real data:** 281 transactions loaded (Oct 2025–Mar 2026), 279 tagged by rules, 2 pending Ollama.
 
 ---
 
@@ -23,11 +43,19 @@ All processing is local. No financial data reaches any external API.
 |--------|---------------|
 | `pipeline.py` | Public library API — orchestrates all stages. CLI delegates here. |
 | `cli.py` | Typer CLI — argument parsing, output formatting, exit codes only. No business logic. |
-| `ingestion/` | IMAP client, attachment download, deduplication via `processed_emails` table |
-| `parsers/` | `BankParser` base, `ParserFactory` (hint optimization), one file per bank |
-| `enrichment/` | Rules engine (fast) → Ollama fallback (optional). Category cache. |
-| `storage/` | SQLAlchemy models, Alembic migrations, repository classes |
-| `chat/` | Read-only Text-to-SQL via Ollama — schema injection, query preview, execution |
+| `ingestion/gmail_client.py` | Gmail API OAuth2 — downloads PDFs from Gmail accounts |
+| `ingestion/imap_client.py` | Generic IMAP — downloads PDFs from Outlook and other accounts |
+| `ingestion/file_scanner.py` | Recursively finds `.pdf`/`.xlsx` in a directory |
+| `ingestion/dedup.py` | SHA-256 file hash deduplication |
+| `parsers/` | `BankParser` base, `ParserFactory`, one file per bank |
+| `enrichment/tags.py` | `TagTaxonomy` — two-level tag hierarchy with expense flags |
+| `enrichment/rules.py` | `SignatureRules` — keyword + direction matching engine |
+| `enrichment/ollama.py` | Ollama batch client (15 tx/call), structured JSON, retries |
+| `enrichment/enricher.py` | Orchestrates: rules → merchant cache → LLM |
+| `storage/models.py` | SQLAlchemy models |
+| `storage/repository.py` | Repository classes per model + `StatsRepository` for analytics |
+| `storage/migrations/` | Alembic migrations (001 initial, 002 enrichment fields) |
+| `chat/` | (M8) Read-only Text-to-SQL via Ollama |
 
 ---
 
@@ -36,36 +64,59 @@ All processing is local. No financial data reaches any external API.
 | Concern | Library |
 |---------|---------|
 | CLI | `typer` + `rich` |
-| Config | `pydantic-settings` v2 + custom YAML loader (see Configuration section) |
-| Email | `imapclient` |
+| Config | `pydantic-settings` v2 + custom YAML loader |
+| Env vars | `python-dotenv` — loaded automatically at CLI startup |
+| Gmail | `google-api-python-client` + `google-auth-oauthlib` |
+| IMAP | `imapclient` |
 | PDF | `pdfplumber` |
 | Spreadsheet | `openpyxl` |
 | ORM | `sqlalchemy` 2.x |
 | Migrations | `alembic` |
 | LLM | `httpx` → Ollama REST API |
 | Resilience | `tenacity` |
-| Packaging | `uv` + `hatchling` |
+| Packaging | `hatchling` |
 | Testing | `pytest` + `pytest-httpx` |
 | Linting | `ruff` |
 | Types | `mypy` strict |
 
 ---
 
-## CLI commands
+## Daily workflow
 
+```bash
+# Get new statements from email
+bank-agent fetch
+
+# Import any new PDFs in data/raw/ (also run after manual downloads)
+bank-agent import data/raw
+
+# Tag new transactions
+bank-agent enrich
+
+# See the dashboard
+bank-agent status
 ```
-bank-agent run              Full pipeline: fetch → parse → enrich → store
-bank-agent import <path>    Import statement files from a local path (primary method)
-bank-agent fetch            Download new statements from email accounts
-bank-agent parse            Parse downloaded files in data/raw/
-bank-agent enrich           Categorise transactions via Ollama
-bank-agent status           Terminal dashboard summary
-bank-agent chat             Natural-language query session (read-only)
-bank-agent config-check     Validate configuration file
-bank-agent db migrate       Apply pending Alembic migrations
-bank-agent db purge         Delete transactions before a given date
-bank-agent db reset         Drop and recreate the database
-bank-agent --version        Print version
+
+---
+
+## Setup requirements
+
+**Files needed (all gitignored):**
+
+| File | Purpose |
+|------|---------|
+| `config/config.yaml` | Main config (copy from `config.example.yaml`) |
+| `config/gmail_credentials.json` | OAuth2 client secrets from Google Cloud Console |
+| `config/gmail_token.json` | Auto-generated after first `bank-agent fetch` |
+| `.env` | Secrets: `PDF_PASSWORD_1`, `PDF_PASSWORD_2`, `EMAIL_OUTLOOK_PASS` |
+
+**First-time setup:**
+```bash
+bank-agent db migrate          # create/update schema
+bank-agent fetch               # authorize Gmail in browser (first run only)
+bank-agent import data/raw     # import any existing PDFs
+bank-agent enrich              # categorize
+bank-agent status              # view dashboard
 ```
 
 ---
@@ -78,24 +129,33 @@ bank-agent --version        Print version
 4. Add anonymized sample PDF to `tests/fixtures/`
 5. Write tests in `tests/parsers/test_<bank_slug>.py`
 
-Full guide: `docs/adding-a-parser.md`
+---
+
+## Enrichment rules
+
+- Bundled rules: `src/enrichment/data/rules.yaml` — edit to add merchants
+- User overrides: `config/categories.yaml` — loaded first, higher priority
+- Tag taxonomy: `src/enrichment/data/tags.yaml` — add new tags here
 
 ---
 
 ## Configuration
 
-Config lives in `config/config.yaml` (gitignored). Template: `config/config.example.yaml`.
+`config/config.yaml` uses `${ENV_VAR}` tokens for secrets. The loader applies `os.path.expandvars` before parsing. Secrets live in `.env`.
 
-`config.yaml` uses `${ENV_VAR}` tokens for secrets. **pydantic-settings does not expand these natively from YAML** — the config loader in `src/bank_agent_llm/config.py` applies `os.path.expandvars` to the raw YAML string before parsing. Actual secret values belong in `.env`, which is also gitignored.
+PDF passwords: Colombian banks encrypt PDFs with the account holder's cédula. Set as `PDF_PASSWORD_1`, `PDF_PASSWORD_2` in `.env`.
+
+Gmail: institutional Google Workspace accounts (`@unal.edu.co`) require OAuth2. Put `gmail_credentials.json` in `config/` and run `bank-agent fetch` once to authorize.
 
 ---
 
 ## Database
 
-- All DB access via the repository layer (`src/storage/`)
-- Schema changes via Alembic only
+- All DB access via the repository layer (`src/storage/repository.py`)
+- Schema changes via Alembic only — never modify tables directly
 - Unique constraint on transactions: `(account_id, date, amount, description_hash, position_in_statement)`
-- Chat interface always uses a **read-only** SQLAlchemy connection — never write access from chat
+- `tag_source` values: `pending | keyword_rule | direction_rule | llm | llm_cache | manual`
+- Chat interface (M8) must use a **read-only** SQLAlchemy connection
 
 ---
 
@@ -103,13 +163,13 @@ Config lives in `config/config.yaml` (gitignored). Template: `config/config.exam
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Stable releases only — merge from `develop` at milestone close |
-| `develop` | Integration branch |
+| `main` | Stable releases only |
+| `develop` | Integration branch — merge features here |
 | `feature/<name>` | New functionality |
 | `fix/<name>` | Bug fixes |
 | `docs/<name>` | Documentation only |
 | `chore/<name>` | Tooling, deps, config |
-| `refactor/<name>` | Behaviour-neutral code changes |
+| `refactor/<name>` | Behaviour-neutral changes |
 
 Commit format: `type: short description` — types: `feat fix docs chore test refactor`
 
@@ -117,15 +177,15 @@ Commit format: `type: short description` — types: `feat fix docs chore test re
 
 ## What NOT to do
 
-- Do not commit `config/config.yaml`, `.env`, or any file with credentials
+- Do not commit `config/config.yaml`, `.env`, `config/gmail_credentials.json`, `config/gmail_token.json`, or any file with credentials
 - Do not put business logic in `cli.py` — it belongs in `pipeline.py` or a module
 - Do not call Ollama directly outside `src/enrichment/` and `src/chat/`
 - Do not skip the rules engine — LLM enrichment is a fallback, not the first step
 - Do not modify an existing parser to add a new bank — always add a new file
 - Do not bypass Alembic to change the schema
-- Do not allow write SQL from the chat interface — always use a read-only connection
-- Do not use `print()` — use `logging` in library code, `rich` in CLI code
-- Do not store PDFs in git — they belong in `data/raw/` (gitignored)
+- Do not allow write SQL from the chat interface — read-only connection always
+- Do not use `print()` — `logging` in library code, `rich` in CLI code
+- Do not store real PDFs in git — they belong in `data/raw/` (gitignored)
 
 ---
 
