@@ -14,7 +14,7 @@ gantt
     M5 Email Ingestion  :done, m5, after m4, 3w
     M6 Status Dashboard :done, m6, after m5, 1w
     section Output
-    M7 Web Dashboard    :active, m7, after m6, 2w
+    M7 Web Dashboard    :done, m7, after m6, 2w
     M8 Chat             :m8, after m7, 3w
     section Distribution
     M9 Portability      :m9, after m8, 2w
@@ -145,19 +145,24 @@ gantt
 
 ---
 
-## M7 — Web Dashboard 🔜
+## M7 — Web Dashboard ✅
 
 **Goal:** Visual financial reports in a browser. Accessible to any user on any OS.
 
-**CLI commands:** `bank-agent dashboard`
+**CLI commands:** `bank-agent dashboard [--port N]`
 
-- [ ] Streamlit web dashboard (`bank-agent dashboard` command)
-  - Monthly income vs expenses chart
-  - Spending by category (pie / bar)
-  - Top merchants
-  - Running balance timeline
-  - Date range filter, account filter
-  - Tag drill-down (click category → see transactions)
+- [x] `src/bank_agent_llm/dashboard/app.py` — Streamlit app with Plotly charts
+  - **Resumen tab:** KPI cards (gasto, ingresos, transacciones, % categorizadas) + monthly income vs expenses grouped bar chart
+  - **Categorías tab:** Donut pie chart by primary tag + horizontal bar chart top categories with transaction counts
+  - **Comercios tab:** Horizontal bar chart top merchants (configurable N) + full table
+  - **Transacciones tab:** Filterable table (type, search, tag), formatted amounts, sortable
+  - **Días tab:** Spending by day-of-week bar chart + transaction count chart + averages table
+  - Sidebar: date range picker, account multiselect, show/hide cancelled, cache clear
+- [x] `bank-agent dashboard` CLI command — runs `streamlit run` subprocess, opens browser
+- [x] `StatsRepository.all_transactions()` — filtered query used by dashboard
+- [x] Data cached with 60s TTL (transactions) and 300s (accounts)
+
+**Pending (M7 extension):**
 - [ ] `docs/powerbi.md` — optional Power BI guide (SQLite ODBC + sample `.pbix`)
 
 ---

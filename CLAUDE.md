@@ -29,11 +29,11 @@ All processing is local. No financial data reaches any external API.
 | M4 Enrichment | ✅ Done | Rules engine 99.3% coverage, Ollama fallback |
 | M5 Email Ingestion | ✅ Done | Gmail OAuth2 + Outlook IMAP |
 | M6 Status Dashboard | ✅ Done | `bank-agent status` Rich terminal report |
-| M7 Web Dashboard | 🔜 Next | Streamlit `bank-agent dashboard` |
-| M8 Chat | 🔜 | `bank-agent chat` (requires Ollama) |
+| M7 Web Dashboard | ✅ Done | Streamlit `bank-agent dashboard` |
+| M8 Chat | 🔜 Next | `bank-agent chat` (requires Ollama) |
 | M9 Portability | 🔜 | Docker, Makefile, docs |
 
-**Real data:** 281 transactions loaded (Oct 2025–Mar 2026), 279 tagged by rules, 2 pending Ollama.
+**Real data:** 647 transactions loaded (Jul 2025–Mar 2026), 532 tagged by rules (82%), 115 pending Ollama.
 
 ---
 
@@ -55,6 +55,7 @@ All processing is local. No financial data reaches any external API.
 | `storage/models.py` | SQLAlchemy models |
 | `storage/repository.py` | Repository classes per model + `StatsRepository` for analytics |
 | `storage/migrations/` | Alembic migrations (001 initial, 002 enrichment fields) |
+| `dashboard/app.py` | Streamlit web dashboard with Plotly charts |
 | `chat/` | (M8) Read-only Text-to-SQL via Ollama |
 
 ---
@@ -74,6 +75,7 @@ All processing is local. No financial data reaches any external API.
 | Migrations | `alembic` |
 | LLM | `httpx` → Ollama REST API |
 | Resilience | `tenacity` |
+| Web dashboard | `streamlit` + `plotly` |
 | Packaging | `hatchling` |
 | Testing | `pytest` + `pytest-httpx` |
 | Linting | `ruff` |
@@ -93,8 +95,11 @@ bank-agent import data/raw
 # Tag new transactions
 bank-agent enrich
 
-# See the dashboard
+# See the terminal dashboard
 bank-agent status
+
+# Open the web dashboard in a browser
+bank-agent dashboard
 ```
 
 ---
