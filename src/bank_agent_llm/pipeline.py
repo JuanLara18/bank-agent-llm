@@ -26,6 +26,7 @@ class FetchResult:
     emails_new: int = 0
     attachments_downloaded: int = 0
     errors: list[str] = field(default_factory=list)
+    discovered_patterns: list[dict] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -199,16 +200,19 @@ class Pipeline:
         logger.info("Pipeline run started (fetch=%s parse=%s enrich=%s)", fetch, parse, enrich)
         raise NotImplementedError("run() not yet implemented — see docs/roadmap.md (M6)")
 
-    def fetch(self) -> "FetchResult":
+    def fetch(self, *, discover: bool = False) -> "FetchResult":
         """Download new statement attachments from all configured email accounts.
 
-        Connects to each configured IMAP account, searches for emails matching
-        bank statement patterns, and saves PDF/XLSX attachments to data/raw/.
-        Already-processed message IDs are tracked in the DB to avoid duplicates.
+        For Gmail accounts with OAuth2 credentials (config/gmail_credentials.json),
+        uses the Gmail API. For other accounts, uses IMAP.
+
+        Args:
+            discover: If True, scan and report email patterns without downloading.
 
         Returns:
             FetchResult with counts per outcome.
         """
+        from bank_agent_llm.ingestion.gmail_client import GmailClient
         from bank_agent_llm.ingestion.imap_client import ImapClient
         from bank_agent_llm.storage.database import get_session
         from bank_agent_llm.storage.repository import ProcessedEmailRepository
@@ -216,13 +220,57 @@ class Pipeline:
         self._init_db()
         settings = self._get_settings()
         raw_dir = Path(settings.pipeline.raw_data_dir)
+        config_dir = Path(self._config_path).parent if self._config_path else Path("config")
         result = FetchResult()
 
-        if not settings.email_accounts:
-            logger.warning("No email accounts configured. Add them to config.yaml.")
-            return result
+        gmail_creds = config_dir / "gmail_credentials.json"
+        gmail_token = config_dir / "gmail_token.json"
 
-        for account_cfg in settings.email_accounts:
+        # ── Gmail OAuth2 accounts ─────────────────────────────────────────────
+        gmail_accounts = [a for a in settings.email_accounts if "gmail" in a.imap_host.lower()]
+        if gmail_creds.exists() and gmail_accounts:
+            for account_cfg in gmail_accounts:
+                result.accounts_checked += 1
+                since_year = 2022  # go back to 2022 for initial import
+                client = GmailClient(
+                    credentials_path=gmail_creds,
+                    token_path=gmail_token,
+                    account_name=account_cfg.name,
+                    since_year=since_year,
+                )
+                with get_session() as session:
+                    repo = ProcessedEmailRepository(session)
+                    if discover:
+                        account_result = client.discover()
+                        result.discovered_patterns.extend(account_result.discovered)
+                    else:
+                        account_result = client.fetch(
+                            dest_dir=raw_dir,
+                            processed_repo=repo,
+                            subject_filter=account_cfg.subject_keywords,
+                        )
+                    session.commit()
+
+                result.emails_scanned += account_result.emails_scanned
+                result.emails_new += account_result.emails_new
+                result.attachments_downloaded += account_result.attachments_downloaded
+                result.errors.extend(account_result.errors)
+
+        # ── IMAP accounts (non-Gmail or Gmail without OAuth creds) ────────────
+        imap_accounts = [
+            a for a in settings.email_accounts
+            if not ("gmail" in a.imap_host.lower() and gmail_creds.exists())
+        ]
+        for account_cfg in imap_accounts:
+            if not account_cfg.password:
+                logger.warning(
+                    "Account %r has no password configured — skipping. "
+                    "Set %s in your .env file.",
+                    account_cfg.name,
+                    f"EMAIL_{account_cfg.name.upper()}_PASS",
+                )
+                continue
+
             result.accounts_checked += 1
             client = ImapClient(
                 host=account_cfg.imap_host,
@@ -234,7 +282,6 @@ class Pipeline:
                 subject_keywords=account_cfg.subject_keywords,
                 lookback_days=settings.pipeline.initial_lookback_days,
             )
-
             with get_session() as session:
                 repo = ProcessedEmailRepository(session)
                 account_result = client.fetch(
@@ -249,13 +296,9 @@ class Pipeline:
             result.attachments_downloaded += account_result.attachments_downloaded
             result.errors.extend(account_result.errors)
 
-            logger.info(
-                "Account %r: scanned=%d new=%d files=%d errors=%d",
-                account_cfg.name,
-                account_result.emails_scanned,
-                account_result.emails_new,
-                account_result.attachments_downloaded,
-                len(account_result.errors),
+        if not settings.email_accounts and not gmail_creds.exists():
+            logger.warning(
+                "No email accounts configured and no gmail_credentials.json found."
             )
 
         return result

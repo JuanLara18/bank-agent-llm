@@ -40,6 +40,10 @@ dependencies = [
     "tenacity>=8.3",
     # Env var loading from .env file
     "python-dotenv>=1.0",
+    # Gmail API OAuth2
+    "google-auth>=2.29",
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.130",
 ]
 
 [project.optional-dependencies]

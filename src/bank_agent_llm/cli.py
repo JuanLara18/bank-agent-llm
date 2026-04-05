@@ -60,14 +60,41 @@ def run(
 @app.command()
 def fetch(
     config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
+    discover: bool = typer.Option(
+        False, "--discover",
+        help="Scan emails and show patterns without downloading anything.",
+    ),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
-    """Download new bank statements from configured email accounts."""
+    """Download new bank statements from configured email accounts.
+
+    On first run with a Gmail account, opens a browser window to authorize access.
+    Use --discover to inspect what bank emails exist before downloading.
+    """
     _setup_logging(log_level)
     from rich.table import Table
     from bank_agent_llm.pipeline import Pipeline
 
-    result = Pipeline(config_path=config_path).fetch()
+    result = Pipeline(config_path=config_path).fetch(discover=discover)
+
+    if discover:
+        if result.discovered_patterns:
+            console.print(
+                f"\n[bold]Patrones encontrados ({len(result.discovered_patterns)} unicos):[/bold]"
+            )
+            seen = Table(show_header=True, header_style="bold")
+            seen.add_column("Remitente", max_width=45)
+            seen.add_column("Asunto", max_width=55)
+            seen.add_column("Fecha", max_width=30)
+            for p in result.discovered_patterns:
+                seen.add_row(p["sender"][:45], p["subject"][:55], p["date"][:25])
+            console.print(seen)
+            console.print(
+                f"\n[dim]Correos con adjunto escaneados: {result.emails_scanned}[/dim]"
+            )
+        else:
+            console.print("[yellow]No se encontraron patrones de correos bancarios.[/yellow]")
+        return
 
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column(style="bold")
@@ -84,13 +111,13 @@ def fetch(
 
     if result.attachments_downloaded:
         console.print(
-            f"[green]{result.attachments_downloaded} archivo(s) descargado(s) en data/raw/. "
+            f"[green]{result.attachments_downloaded} archivo(s) en data/raw/. "
             "Ejecuta 'bank-agent import data/raw' para procesarlos.[/green]"
         )
     elif result.accounts_checked == 0:
         console.print(
-            "[yellow]No hay cuentas de correo configuradas. "
-            "Agrega email_accounts en config/config.yaml.[/yellow]"
+            "[yellow]Pon config/gmail_credentials.json o configura email_accounts "
+            "en config/config.yaml.[/yellow]"
         )
 
 
