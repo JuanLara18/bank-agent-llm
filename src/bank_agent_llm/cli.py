@@ -59,17 +59,39 @@ def run(
 
 @app.command()
 def fetch(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
     """Download new bank statements from configured email accounts."""
     _setup_logging(log_level)
+    from rich.table import Table
     from bank_agent_llm.pipeline import Pipeline
 
-    try:
-        Pipeline().fetch()
-    except NotImplementedError:
-        err_console.print("[yellow]Not yet implemented (M2).[/yellow]")
-        raise typer.Exit(1)
+    result = Pipeline(config_path=config_path).fetch()
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("Cuentas revisadas", str(result.accounts_checked))
+    table.add_row("Correos escaneados", str(result.emails_scanned))
+    table.add_row("Correos nuevos", f"[green]{result.emails_new}[/green]")
+    table.add_row("Archivos descargados", f"[green]{result.attachments_downloaded}[/green]")
+    table.add_row("Errores", f"[red]{len(result.errors)}[/red]" if result.errors else "0")
+    console.print(table)
+
+    for err in result.errors:
+        err_console.print(f"  [red]-[/red] {err}")
+
+    if result.attachments_downloaded:
+        console.print(
+            f"[green]{result.attachments_downloaded} archivo(s) descargado(s) en data/raw/. "
+            "Ejecuta 'bank-agent import data/raw' para procesarlos.[/green]"
+        )
+    elif result.accounts_checked == 0:
+        console.print(
+            "[yellow]No hay cuentas de correo configuradas. "
+            "Agrega email_accounts en config/config.yaml.[/yellow]"
+        )
 
 
 @app.command()
