@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 
 import typer
+from dotenv import load_dotenv
+
+load_dotenv()
 from rich.console import Console
 from rich.logging import RichHandler
 
