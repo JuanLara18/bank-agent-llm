@@ -122,25 +122,45 @@ def chat(
 @app.command("import")
 def import_files(
     path: str = typer.Argument(..., help="Path to a statement file or directory of files."),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config file."),
     log_level: str = typer.Option("INFO", envvar="LOG_LEVEL"),
 ) -> None:
     """Import statement files from a local path, skipping email ingestion.
 
-    Use this when you have already downloaded statements from your bank's
-    web portal or have an existing folder of PDFs/spreadsheets.
+    Use this when you have downloaded statements from your bank's web portal
+    or have an existing folder of PDFs/spreadsheets.
     """
     _setup_logging(log_level)
-    from pathlib import Path
-
+    from pathlib import Path as P
+    from rich.table import Table
     from bank_agent_llm.pipeline import Pipeline
 
     try:
-        Pipeline().import_files(Path(path))
-    except NotImplementedError:
-        err_console.print("[yellow]Not yet implemented (M2).[/yellow]")
-        raise typer.Exit(1)
+        result = Pipeline(config_path=config_path).import_files(P(path))
     except FileNotFoundError:
         err_console.print(f"[red]Path not found: {path}[/red]")
+        raise typer.Exit(1)
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("Files scanned", str(result.scanned))
+    table.add_row("Transactions imported", f"[green]{result.imported}[/green]")
+    table.add_row("Skipped (already imported)", str(result.skipped_dedup))
+    table.add_row("Skipped (no parser)", str(result.skipped_no_parser))
+    table.add_row("Errors", f"[red]{result.errors}[/red]" if result.errors else "0")
+    console.print(table)
+
+    for detail in result.error_details:
+        err_console.print(f"  [red]•[/red] {detail}")
+
+    if result.skipped_no_parser:
+        console.print(
+            f"[yellow]{result.skipped_no_parser} file(s) had no matching parser. "
+            "See docs/adding-a-parser.md.[/yellow]"
+        )
+
+    if not result.success:
         raise typer.Exit(1)
 
 
@@ -224,8 +244,9 @@ def db_purge(
 
     try:
         Pipeline().purge(before=before)
-    except NotImplementedError:
-        err_console.print("[yellow]Not yet implemented (M5).[/yellow]")
+        console.print(f"[green]Transactions before {before} deleted.[/green]")
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
 
