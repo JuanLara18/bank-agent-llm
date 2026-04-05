@@ -1,67 +1,65 @@
 # Roadmap
 
-Each milestone produces a working, testable slice of the system. Milestones map to GitHub Milestones; individual items map to Issues.
+Each milestone produces a working, testable slice of the system with at least one usable CLI command. Milestones map to GitHub Milestones; individual items map to Issues.
 
 ```mermaid
 gantt
     title bank-agent-llm milestones
     dateFormat YYYY-MM
     section Core
-    M1 Foundation       :m1, 2025-04, 3w
-    M2 Ingestion        :m2, after m1, 3w
+    M1 Foundation       :m1, 2026-04, 3w
+    M2 File Import      :m2, after m1, 2w
     M3 First Parser     :m3, after m2, 2w
-    M4 Enrichment       :m4, after m3, 2w
+    M4 Enrichment       :m4, after m3, 3w
+    M5 IMAP Ingestion   :m5, after m4, 3w
     section Output
-    M5 Pipeline CLI     :m5, after m4, 1w
-    M6 Power BI         :m6, after m5, 2w
-    M7 Chat             :m7, after m6, 3w
+    M6 Pipeline CLI     :m6, after m5, 1w
+    M7 Dashboard        :m7, after m6, 2w
+    M8 Chat             :m8, after m7, 3w
     section Distribution
-    M8 Portability      :m8, after m7, 2w
+    M9 Portability      :m9, after m8, 2w
 ```
 
 ---
 
 ## M1 — Foundation
 
-**Goal:** A fully scaffolded, installable project with a working CLI skeleton and database infrastructure. No pipeline logic yet.
+**Goal:** Installable project with a working CLI skeleton, config validation, and database infrastructure. No pipeline logic yet.
 
 **CLI commands delivered:** `bank-agent --version`, `bank-agent --help`, `bank-agent config-check`, `bank-agent db migrate`, `bank-agent db reset`
 
 - [x] Git repo, branch strategy, CLAUDE.md
-- [x] `pyproject.toml` with all dependencies
+- [x] `pyproject.toml` with all dependencies declared
 - [x] `src/` package structure with `py.typed` marker
-- [x] `Pipeline` class (public library API)
-- [x] CLI skeleton with Typer (`cli.py`)
-- [x] `BankParser` abstract base class
-- [x] `ParserFactory` with `UnsupportedBankError`
+- [x] `Pipeline` class (public library API with all method stubs)
+- [x] CLI skeleton with Typer — all commands stubbed
+- [x] `BankParser` abstract base class with `hint` param and `position_in_statement`
+- [x] `ParserFactory` with hint optimization and `UnsupportedBankError`
 - [x] `ParserFactory` unit tests
-- [x] GitHub Actions CI (lint + type check + tests)
+- [x] GitHub Actions CI (lint + type check + tests on every PR)
 - [x] Issue and PR templates
-- [ ] `src/bank_agent_llm/config.py` — Pydantic Settings reading `config/config.yaml` + `.env`
-- [ ] `bank-agent config-check` implemented
-- [ ] `src/storage/models.py` — SQLAlchemy models: `Account`, `Transaction`, `Category`, `ProcessedEmail`
-- [ ] `src/storage/repository.py` — repository classes per model
+- [ ] `src/bank_agent_llm/config.py` — Pydantic Settings + `os.path.expandvars` YAML loader
+- [ ] `bank-agent config-check` — validates config and reports errors clearly (no stack traces)
+- [ ] `src/storage/models.py` — SQLAlchemy models: `Account`, `Transaction`, `Category`, `ProcessedEmail`, `FileProcessingRun`, `PipelineRun`
+- [ ] `src/storage/repository.py` — repository class per model
 - [ ] First Alembic migration (`001_initial_schema`)
-- [ ] `bank-agent db migrate` implemented
-- [ ] `bank-agent db reset` implemented
+- [ ] `bank-agent db migrate` and `bank-agent db reset` implemented
 - [ ] Unit tests for config validation
 - [ ] Unit tests for repository layer (in-memory SQLite)
 
 ---
 
-## M2 — Ingestion
+## M2 — File Import
 
-**Goal:** Connect to real email accounts and download statement attachments incrementally.
+**Goal:** Parse statement files from a local path. No email required. This is the primary and simplest ingestion path.
 
-**CLI commands delivered:** `bank-agent fetch`
+**CLI commands delivered:** `bank-agent import <path>`
 
-- [ ] `src/ingestion/imap_client.py` — `IMAPClient` wrapping `imapclient` with `tenacity` retries
-- [ ] `src/ingestion/attachment_filter.py` — filter by extension, sender domain, subject keywords
-- [ ] `src/ingestion/dedup.py` — check `processed_emails` table before downloading
-- [ ] `src/ingestion/downloader.py` — save attachments to `data/raw/<account>/<date>/`
-- [ ] `bank-agent fetch` implemented end-to-end
-- [ ] Unit tests with mocked `imapclient` session
-- [ ] Integration test against a local IMAP server (Greenmail or similar)
+- [ ] `src/ingestion/file_scanner.py` — recursively find `.pdf` and `.xlsx` files in a directory
+- [ ] `src/ingestion/dedup.py` — check `file_processing_runs` table before re-parsing a file (by SHA-256 hash)
+- [ ] `Pipeline.import_files(path)` wired end-to-end: scan → dedup → parse → enrich → store
+- [ ] `bank-agent import <path>` implemented
+- [ ] Unit tests for file scanner and dedup logic
 
 ---
 
@@ -69,12 +67,9 @@ gantt
 
 **Goal:** Parse one real bank's statements end-to-end and store transactions in the DB.
 
-**CLI commands delivered:** `bank-agent parse`
-
-- [ ] Choose first bank (based on available statement samples)
-- [ ] `src/parsers/<bank_slug>.py` — concrete parser with `can_parse()` and `parse()`
+- [ ] Choose first bank (based on available statement samples — open an Issue with the bank name)
+- [ ] `src/parsers/<bank_slug>.py` — concrete parser implementing `can_parse()` and `parse()`
 - [ ] Registered in `ParserFactory`
-- [ ] `bank-agent parse` implemented — processes all files in `data/raw/`, stores to DB
 - [ ] Anonymized sample PDF in `tests/fixtures/`
 - [ ] Integration test: parse fixture → assert expected transactions in DB
 
@@ -82,73 +77,91 @@ gantt
 
 ## M4 — Enrichment
 
-**Goal:** Auto-categorize every transaction description using a local Ollama model.
+**Goal:** Auto-categorize transactions. Ollama is optional — the rules engine runs first.
 
 **CLI commands delivered:** `bank-agent enrich`
 
-- [ ] `src/enrichment/ollama_client.py` — thin `httpx` wrapper over Ollama REST API with `tenacity`
-- [ ] `src/enrichment/categorizer.py` — batch categorization, category prompt template
-- [ ] `src/enrichment/cache.py` — skip already-categorized descriptions
-- [ ] Category taxonomy configurable in `config.yaml`
+- [ ] `src/enrichment/rules_engine.py` — keyword/regex rules loaded from `config.yaml`; handles ~80% of transactions at zero LLM cost
+- [ ] `src/enrichment/ollama_client.py` — `httpx` wrapper over Ollama REST API with `tenacity` retries
+- [ ] `src/enrichment/categorizer.py` — runs rules engine first, falls back to Ollama for unmatched descriptions
+- [ ] `src/enrichment/cache.py` — skip already-categorized raw descriptions
 - [ ] `bank-agent enrich` implemented
+- [ ] Ollama dependency is **optional**: if not running, rules-engine-only mode works without error
 - [ ] Unit tests with `pytest-httpx` mocking Ollama responses
 - [ ] Confidence score stored per transaction
 
 ---
 
-## M5 — Full Pipeline CLI
+## M5 — IMAP Ingestion
 
-**Goal:** End-to-end `bank-agent run` command and a `bank-agent status` dashboard in the terminal.
+**Goal:** Automatically download new statements from email accounts.
+
+**CLI commands delivered:** `bank-agent fetch`
+
+- [ ] `src/ingestion/imap_client.py` — `IMAPClient` wrapping `imapclient` with `tenacity` retries
+- [ ] OAuth2 authentication support for Gmail and Outlook (app-password fallback documented)
+- [ ] `src/ingestion/attachment_filter.py` — filter by extension, sender domain, subject keywords
+- [ ] `src/ingestion/email_dedup.py` — check `processed_emails` table before downloading
+- [ ] `bank-agent fetch` implemented end-to-end
+- [ ] Unit tests with mocked `imapclient` session
+
+---
+
+## M6 — Full Pipeline CLI
+
+**Goal:** End-to-end `bank-agent run` command and a `bank-agent status` terminal dashboard.
 
 **CLI commands delivered:** `bank-agent run`, `bank-agent status`
 
-- [ ] `Pipeline.run()` wires up M2 + M3 + M4 in sequence
+- [ ] `Pipeline.run()` wires M2 + M3 + M4 (import → parse → enrich)
 - [ ] `bank-agent run` with `--no-fetch`, `--no-enrich` flags
-- [ ] `bank-agent status` — Rich table showing: accounts, date range, transaction count, top categories, uncategorized count
-- [ ] End-to-end integration test: fetch mock → parse fixture → enrich mock → assert DB state
-- [ ] `docs/setup.md` — full setup walkthrough
+- [ ] `bank-agent status` — Rich table showing: accounts, date range, transaction count, top categories, uncategorized count, last pipeline run
+- [ ] `PipelineRun` tracking in DB — each run records stages, counts, status
+- [ ] `bank-agent db purge --before <date>` implemented
+- [ ] End-to-end integration test: import fixture → parse → enrich mock → assert DB state
+- [ ] `docs/setup.md` — complete setup walkthrough
 
 ---
 
-## M6 — Power BI
+## M7 — Dashboard
 
-**Goal:** A published Power BI report connected to the local database.
+**Goal:** Visual financial reports accessible to any user on any OS.
 
-- [ ] SQLite ODBC connection guide in `docs/powerbi.md`
-- [ ] PostgreSQL DirectQuery connection guide
-- [ ] Sample `.pbix` file with views:
+- [ ] `bank-agent status --rich` — expanded terminal dashboard with Rich panels (income vs expenses, top categories, monthly trend, per-account breakdown)
+- [ ] Optional Streamlit web dashboard (`bank-agent dashboard` command)
   - Monthly income vs expenses
-  - Spending by category (donut + trend)
+  - Spending by category
   - Top merchants
-  - Per-account breakdown
   - Running balance timeline
+  - Date range and account filters
+- [ ] `docs/powerbi.md` — optional Power BI guide for Windows users (SQLite ODBC + sample `.pbix`)
 
 ---
 
-## M7 — Chat Interface
+## M8 — Chat Interface
 
-**Goal:** Ask questions about transactions in natural language from the terminal.
+**Goal:** Natural-language queries over transaction history from the terminal.
 
 **CLI commands delivered:** `bank-agent chat`
 
 - [ ] `src/chat/schema_inspector.py` — introspect DB schema for prompt injection
-- [ ] `src/chat/text_to_sql.py` — build SQL from natural language using Ollama
+- [ ] `src/chat/text_to_sql.py` — build SQL from natural language using Ollama; always uses a read-only connection
 - [ ] `src/chat/session.py` — multi-turn conversation with history
-- [ ] `bank-agent chat` — interactive REPL with Rich formatting
-- [ ] Example queries documented in `docs/chat.md`
+- [ ] SQL preview shown to user before execution — never runs without confirmation
+- [ ] `bank-agent chat` REPL with Rich formatting
+- [ ] `docs/chat.md` — example queries and limitations
 - [ ] Unit tests with mocked Ollama and in-memory DB
 
 ---
 
-## M8 — Portability
+## M9 — Portability
 
-**Goal:** Anyone can clone and run in under 10 minutes. Package publishable to PyPI.
+**Goal:** Clone and run in under 10 minutes. Distributable via Docker.
 
 - [ ] `docker-compose.yml` — app container + Ollama sidecar
-- [ ] `Makefile` with targets: `setup`, `run`, `test`, `lint`
-- [ ] `docs/setup.md` — complete onboarding guide
-- [ ] Config validation with user-friendly error messages (not stack traces)
+- [ ] `Makefile` targets: `setup`, `run`, `test`, `lint`
+- [ ] Config validation with user-friendly error messages (no stack traces for missing fields)
+- [ ] `docs/extending.md` — register custom parsers from outside the repo (plugin pattern)
 - [ ] `CHANGELOG.md` — semver changelog
-- [ ] `pyproject.toml` ready for `uv publish` / PyPI release
 - [ ] GitHub release workflow (`.github/workflows/release.yml`)
-- [ ] `docs/extending.md` — how to register custom parsers from outside the repo
+- [ ] README install instructions verified end-to-end on clean machine
