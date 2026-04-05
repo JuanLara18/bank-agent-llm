@@ -1,53 +1,90 @@
 # bank-agent-llm
 
-> Local-first, AI-powered ETL pipeline for personal financial intelligence.
+Local-first, AI-powered pipeline for personal financial intelligence. Fetches bank statements from email, parses them across bank formats, categorizes transactions with a local LLM, and surfaces the data via Power BI dashboards and a natural-language CLI.
 
-Automatically fetches bank statements from multiple email accounts, parses them across different bank formats, categorizes transactions using a local LLM (Ollama), and prepares a unified database for Power BI dashboards and natural-language Chat-to-SQL queries.
+**All processing is 100% local — financial data never leaves the machine.**
 
-**100% local processing — your financial data never leaves your machine.**
+---
+
+## Pipeline
+
+```mermaid
+flowchart LR
+    A([Email Accounts\nIMAP]) --> B[Ingestion]
+    B --> C{Parser Factory}
+    C --> D[Bank A]
+    C --> E[Bank B]
+    C --> F[Bank N]
+    D & E & F --> G[Enrichment\nOllama LLM]
+    G --> H[(SQLite / PostgreSQL)]
+    H --> I[Power BI\nDashboard]
+    H --> J[CLI Chat\nText-to-SQL]
+```
 
 ---
 
 ## Features
 
-- Connects to multiple email accounts via IMAP to fetch bank statement attachments
-- Detects bank format automatically and routes to the correct parser (Factory pattern)
-- Normalizes transactions from multiple banks into a single schema
-- Uses **Ollama** (local LLM) to auto-categorize raw transaction descriptions
-- Exports to a local SQLite database for **Power BI** dashboards
-- Ask questions about your finances in natural language via a local Chat-to-SQL interface
-- Incremental updates — only processes new statements on each run
-- Portable: minimal configuration to set up for any user
+- Connects to multiple IMAP email accounts simultaneously
+- Auto-detects bank format and routes to the correct parser (Factory pattern)
+- Normalizes transactions from any bank into a single schema
+- Categorizes raw transaction descriptions using a local Ollama model
+- Incrementally updates — only processes new statements on each run
+- Power BI dashboard ready via direct SQLite/PostgreSQL connection
+- Natural-language chat over your transaction history (`bank-agent chat`)
+- Usable as a CLI tool or as a Python library
 
 ---
 
-## Architecture
+## CLI
 
 ```
-Email Accounts (IMAP)
-        │
-        ▼
-  [Ingestion Layer]
-  Download attachments
-  Track processed emails
-        │
-        ▼
-  [Parser Factory]
-  Detect bank → Route to parser
-  Bancolombia / Nequi / Nubank / ...
-        │
-        ▼
-  [Enrichment Layer]
-  Ollama LLM → Categorize transactions
-        │
-        ▼
-  [Storage Layer]
-  SQLite DB (SQLAlchemy + Alembic)
-        │
-    ┌───┴────┐
-    ▼        ▼
-Power BI   Chat-to-SQL
-Dashboard  (Ollama)
+bank-agent run            Full pipeline: fetch → parse → enrich → store
+bank-agent fetch          Download new statements from email accounts
+bank-agent parse          Parse downloaded statement files
+bank-agent enrich         Categorise transactions via Ollama
+bank-agent status         Show database summary
+bank-agent chat           Interactive natural-language query session
+bank-agent config-check   Validate configuration file
+bank-agent db migrate     Apply pending database migrations
+bank-agent db reset       Drop and recreate the database
+bank-agent --version      Show version
+```
+
+---
+
+## As a Library
+
+```python
+from bank_agent_llm import Pipeline
+
+pipeline = Pipeline(config_path="config/config.yaml")
+pipeline.run()
+
+# Or run individual stages:
+pipeline.fetch()
+pipeline.parse()
+pipeline.enrich()
+```
+
+---
+
+## Quick Start
+
+**Prerequisites:** Python 3.11+, [Ollama](https://ollama.ai) running locally.
+
+```bash
+git clone https://github.com/JuanLara18/bank-agent-llm.git
+cd bank-agent-llm
+
+pip install uv
+uv sync
+
+cp config/config.example.yaml config/config.yaml
+# Fill in email credentials and Ollama settings
+
+bank-agent db migrate
+bank-agent run
 ```
 
 ---
@@ -56,47 +93,15 @@ Dashboard  (Ollama)
 
 | Bank | Status |
 |------|--------|
-| *(first bank coming in M3)* | Planned |
+| *(first parser — M3)* | Planned |
 
-Adding a new bank requires creating one parser file. See [CLAUDE.md](CLAUDE.md) and [docs/adding-a-parser.md](docs/adding-a-parser.md).
-
----
-
-## Quick Start
-
-> Detailed setup instructions: [docs/setup.md](docs/setup.md)
-
-```bash
-git clone https://github.com/JuanLara18/bank-agent-llm.git
-cd bank-agent-llm
-pip install uv
-uv sync
-cp config/config.example.yaml config/config.yaml
-# Edit config.yaml with your email credentials and bank settings
-uv run alembic upgrade head
-uv run python -m bank_agent_llm.main
-```
-
-**Prerequisites:** Python 3.11+, [Ollama](https://ollama.ai) installed and running locally.
+Adding a bank requires one file. See [docs/adding-a-parser.md](docs/adding-a-parser.md).
 
 ---
 
 ## Project Status
 
-Currently in **M1: Foundation** phase. See [docs/roadmap.md](docs/roadmap.md) for the full plan.
-
----
-
-## Contributing
-
-This project follows a GitHub Flow adapted for solo/small-team development.
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md) for conventions.
-
----
-
-## Privacy
-
-No data is sent to external APIs. All LLM inference runs locally via Ollama. Bank credentials are stored only in your local `config/config.yaml` (gitignored).
+**M1: Foundation** — in progress. See [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
