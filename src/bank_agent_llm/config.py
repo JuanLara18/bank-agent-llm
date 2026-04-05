@@ -69,6 +69,10 @@ class PipelineConfig(BaseModel):
     processed_data_dir: str = "data/processed"
     initial_lookback_days: int = 365
     log_level: str = "INFO"
+    # Passwords tried in order when opening encrypted PDF statements.
+    # Many banks encrypt PDFs with the account holder's ID or a known pattern.
+    # Use env var references: ["${PDF_PASSWORD_BANK_A}", "${PDF_PASSWORD_BANK_B}"]
+    pdf_passwords: list[str] = []
 
     @field_validator("log_level")
     @classmethod

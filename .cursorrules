@@ -1,0 +1,47 @@
+# Agent context — bank-agent-llm
+# Read CLAUDE.md before touching any code. It is the authoritative reference.
+
+## What this project is
+Local-first Python CLI + library. Fetches bank statement PDFs from Gmail (OAuth2)
+and Outlook (IMAP), parses them, stores transactions in SQLite, categorizes with a
+keyword rules engine (99%+ coverage) + Ollama fallback, and renders dashboards via
+Rich (terminal) and Streamlit (web).
+
+## Milestone status
+M1-M7 done. M8 Chat is next (`bank-agent chat`, Text-to-SQL via Ollama mistral:7b).
+
+## Critical rules
+- All DB access through repository layer (`src/bank_agent_llm/storage/repository.py`).
+  Never raw SQL outside that module.
+- No business logic in `cli.py` — belongs in `pipeline.py` or a domain module.
+- Schema changes via Alembic only: `bank-agent db migrate`.
+- New bank = new parser file. Never modify an existing parser to add another bank.
+- Ollama calls only inside `src/enrichment/` and `src/chat/` (M8).
+- Chat interface (M8) must use a read-only SQLAlchemy connection. Never allow writes.
+- Do not commit config/config.yaml, .env, config/gmail_credentials.json, config/gmail_token.json.
+
+## Key data facts (as of 2026-04-05)
+- 942 transactions, Jul 2025 – Mar 2026, all credit card statements (not savings).
+- direction=credit means card payment (abono), NOT income. Tag: pago-tarjeta.
+- "Ampliacion de Plazo" parser fix: stores cuota mensual (N/M), not total balance.
+  Each installment has description "AMPLIACION DE PLAZO N/M" for unique dedup hash.
+- 938/942 tagged. 4 pending (Ollama JSON edge cases). Run `bank-agent enrich`.
+- mistral:7b pulled at localhost:11434 and working.
+
+## Daily commands
+```
+bank-agent fetch          # download new PDFs from Gmail / Outlook
+bank-agent import data/raw
+bank-agent enrich
+bank-agent status         # Rich terminal dashboard
+bank-agent dashboard      # Streamlit web dashboard (http://localhost:8501)
+```
+
+## Branch conventions
+feature/<name> | fix/<name> | docs/<name> | chore/<name>
+Commit format: "type: short description" (feat / fix / docs / chore / refactor)
+Integration branch: develop. Stable: main.
+
+## Full context
+See CLAUDE.md (architecture, module table, setup, adding parsers, enrichment rules).
+See docs/roadmap.md (milestone details, decisions, constraints).
