@@ -46,8 +46,9 @@ _CUOTAS_RE = re.compile(r"^\d+/\d+$")
 # Percentage token: e.g. "1,89%" or "25,25%"
 _PERCENT_RE = re.compile(r"^\d+[,.]?\d*%$")
 
-# Card/account number in header
-_CARD_RE = re.compile(r"\b(\d{4}[\s*-]+\d{4}[\s*-]+\d{4}[\s*-]+\d{4})\b")
+# Contract number in header: "Contrato No: 00010105000014301065"
+# We use the last 4 digits as the account identifier (e.g. 1065)
+_CONTRACT_RE = re.compile(r"\b(\d{10,})\b")
 
 
 class ScotiabankParser(BankParser):
@@ -86,12 +87,12 @@ class ScotiabankParser(BankParser):
                             current_direction = TransactionDirection.DEBIT
                             continue
 
-                        # Extract card number from header
+                        # Extract account identifier from contract number
+                        # Header row: ['Contrato', 'No:', '00010105000014301065']
                         if account_number is None:
-                            m = _CARD_RE.search(" ".join(tokens))
+                            m = _CONTRACT_RE.search(" ".join(tokens))
                             if m:
-                                digits = re.sub(r"[^\d]", "", m.group(1))
-                                account_number = digits[-4:]
+                                account_number = m.group(1)[-4:]
 
                         tx = _parse_row(
                             tokens,
