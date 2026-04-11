@@ -6,19 +6,18 @@ directly. Run ``bank-agent db migrate`` to apply pending migrations.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     Date,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,
-    Time,
     UniqueConstraint,
     func,
 )
@@ -46,22 +45,6 @@ class Account(Base):
     )
 
 
-class Category(Base):
-    """Transaction categories, optionally nested."""
-
-    __tablename__ = "categories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    parent_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    color: Mapped[str | None] = mapped_column(String(7), nullable=True)  # hex color
-
-    parent: Mapped[Category | None] = relationship("Category", remote_side="Category.id")
-    transactions: Mapped[list[Transaction]] = relationship("Transaction", back_populates="category")
-
-
 class Transaction(Base):
     """One row per transaction.
 
@@ -87,16 +70,10 @@ class Transaction(Base):
         Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
-    transaction_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="COP")
     direction: Mapped[str] = mapped_column(String(6), nullable=False)  # debit | credit
     raw_description: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    category_confidence: Mapped[float | None] = mapped_column(nullable=True)
     source_file: Mapped[str] = mapped_column(Text, nullable=False)
     description_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     position_in_statement: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -107,7 +84,6 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     account: Mapped[Account] = relationship("Account", back_populates="transactions")
-    category: Mapped[Category | None] = relationship("Category", back_populates="transactions")
 
 
 class ProcessedEmail(Base):

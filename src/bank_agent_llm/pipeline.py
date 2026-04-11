@@ -164,7 +164,6 @@ class Pipeline:
                         tx = Transaction(
                             account_id=account.id,
                             date=raw.date,
-                            transaction_time=raw.transaction_time,
                             amount=raw.amount,
                             currency=raw.currency,
                             direction=raw.direction.value,
@@ -215,7 +214,7 @@ class Pipeline:
         logger.info("Pipeline run started (fetch=%s parse=%s enrich=%s)", fetch, parse, enrich)
         raise NotImplementedError("run() not yet implemented — see docs/roadmap.md (M6)")
 
-    def fetch(self, *, discover: bool = False) -> "FetchResult":
+    def fetch(self, *, discover: bool = False) -> FetchResult:
         """Download new statement attachments from all configured email accounts.
 
         For Gmail accounts with OAuth2 credentials (config/gmail_credentials.json),
@@ -322,7 +321,7 @@ class Pipeline:
         """Parse any unprocessed statement files in the raw data directory."""
         raise NotImplementedError("parse() not yet implemented — see docs/roadmap.md (M3)")
 
-    def enrich(self, *, force: bool = False) -> "EnrichResult":  # type: ignore[name-defined]
+    def enrich(self, *, force: bool = False) -> EnrichResult:  # type: ignore[name-defined]
         """Tag all pending transactions using rules engine and optional Ollama.
 
         Args:
@@ -331,7 +330,7 @@ class Pipeline:
         Returns:
             EnrichResult with counts per tagging source.
         """
-        from bank_agent_llm.enrichment.enricher import EnrichResult, TransactionEnricher
+        from bank_agent_llm.enrichment.enricher import TransactionEnricher
         from bank_agent_llm.storage.database import get_session
 
         self._init_db()

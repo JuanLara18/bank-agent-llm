@@ -8,19 +8,16 @@ the session's lifetime (request, pipeline run, etc.).
 from __future__ import annotations
 
 import hashlib
-from datetime import date
-
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bank_agent_llm.storage.models import (
     Account,
-    Category,
     FileProcessingRun,
     MerchantCache,
     PipelineRun,
@@ -65,25 +62,6 @@ class AccountRepository:
         return list(self._s.execute(select(Account)).scalars())
 
 
-# ─── Category ────────────────────────────────────────────────────────────────
-
-class CategoryRepository:
-    def __init__(self, session: Session) -> None:
-        self._s = session
-
-    def get_or_create(self, name: str, parent_id: int | None = None) -> Category:
-        stmt = select(Category).where(Category.name == name)
-        category = self._s.execute(stmt).scalar_one_or_none()
-        if category is None:
-            category = Category(name=name, parent_id=parent_id)
-            self._s.add(category)
-            self._s.flush()
-        return category
-
-    def all(self) -> list[Category]:
-        return list(self._s.execute(select(Category)).scalars())
-
-
 # ─── Transaction ─────────────────────────────────────────────────────────────
 
 class TransactionRepository:
@@ -112,10 +90,6 @@ class TransactionRepository:
 
     def find_by_account(self, account_id: int) -> list[Transaction]:
         stmt = select(Transaction).where(Transaction.account_id == account_id)
-        return list(self._s.execute(stmt).scalars())
-
-    def find_uncategorized(self) -> list[Transaction]:
-        stmt = select(Transaction).where(Transaction.category_id.is_(None))
         return list(self._s.execute(stmt).scalars())
 
     def count(self) -> int:
