@@ -7,10 +7,10 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from bank_agent_llm.storage.models import Account, Base, Transaction
+from bank_agent_llm.storage.models import Account, Base, FileProcessingRun, Transaction
 from bank_agent_llm.storage.repository import (
     AccountRepository,
     CategoryRepository,
@@ -172,6 +172,36 @@ def test_errored_file_not_considered_processed(session: Session) -> None:
     repo = FileProcessingRunRepository(session)
     repo.create("bad.pdf", "def456", "error", error_message="parse failed")
     assert repo.is_processed("def456") is False
+
+
+def test_skipped_file_is_retried_on_next_run(session: Session) -> None:
+    """A file previously marked 'skipped' must be retried so that parser fixes
+    automatically pick up previously-dropped statements."""
+    repo = FileProcessingRunRepository(session)
+    repo.create("unknown.pdf", "ghi789", "skipped", error_message="no parser matched")
+    assert repo.is_processed("ghi789") is False
+
+
+def test_record_outcome_upserts_by_hash(session: Session) -> None:
+    """record_outcome updates the existing row for a hash instead of raising
+    on the unique constraint — so a retry after a parser fix overwrites the
+    previous 'skipped' outcome."""
+    repo = FileProcessingRunRepository(session)
+    repo.record_outcome("old.pdf", "hash1", "skipped", error_message="no parser matched")
+    repo.record_outcome(
+        "new.pdf", "hash1", "success",
+        bank_name="TestBank", transaction_count=42,
+    )
+    assert repo.is_processed("hash1") is True
+    rows = list(session.execute(select(FileProcessingRun).where(
+        FileProcessingRun.file_hash == "hash1"
+    )).scalars())
+    assert len(rows) == 1
+    assert rows[0].status == "success"
+    assert rows[0].bank_name == "TestBank"
+    assert rows[0].transaction_count == 42
+    assert rows[0].error_message is None
+    assert rows[0].file_path == "new.pdf"
 
 
 # ─── PipelineRunRepository ────────────────────────────────────────────────────

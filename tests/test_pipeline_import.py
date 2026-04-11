@@ -77,16 +77,22 @@ def test_import_pdf_with_no_parser_increments_skipped(
     assert result.scanned == 1
     assert result.skipped_no_parser == 1
     assert result.imported == 0
+    assert len(result.skipped_details) == 1
+    name, reason = result.skipped_details[0]
+    assert name == "unknown_bank.pdf"
+    assert reason  # non-empty explanation
 
 
-def test_import_same_file_twice_deduplicates(tmp_path: Path, config_file: Path) -> None:
+def test_skipped_file_is_retried_on_next_run(tmp_path: Path, config_file: Path) -> None:
+    """A file that had no parser on the first run must be retried on the next
+    run — so that adding or fixing a parser automatically picks it up."""
     pdf = tmp_path / "unknown_bank.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake content")
     from bank_agent_llm.pipeline import Pipeline
     pipeline = Pipeline(config_path=str(config_file))
     r1 = pipeline.import_files(tmp_path)
     r2 = pipeline.import_files(tmp_path)
-    assert r1.scanned == 1
+    assert r1.skipped_no_parser == 1
     assert r2.scanned == 1
-    assert r2.skipped_dedup == 1
-    assert r2.skipped_no_parser == 0
+    assert r2.skipped_dedup == 0
+    assert r2.skipped_no_parser == 1
