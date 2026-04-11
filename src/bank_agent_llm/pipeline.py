@@ -41,8 +41,11 @@ class ImportResult:
     imported: int = 0       # new transactions stored
     skipped_dedup: int = 0  # files already in DB
     skipped_no_parser: int = 0
+    empty_parses: int = 0   # parser matched but returned 0 transactions
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
+    skipped_details: list[tuple[str, str]] = field(default_factory=list)
+    empty_parse_details: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -126,9 +129,14 @@ class Pipeline:
                 try:
                     parser = factory.get_parser(file_path, passwords=passwords)
                 except UnsupportedBankError:
-                    logger.warning("No parser for: %s", file_path.name)
-                    file_repo.create(str(file_path), file_hash, "skipped")
+                    reason = "no parser matched first-page signature"
+                    logger.warning("No parser for: %s (%s)", file_path.name, reason)
+                    file_repo.record_outcome(
+                        str(file_path), file_hash, "skipped",
+                        error_message=reason,
+                    )
                     result.skipped_no_parser += 1
+                    result.skipped_details.append((file_path.name, reason))
                     continue
 
                 try:
@@ -169,7 +177,7 @@ class Pipeline:
                         if created:
                             new_count += 1
 
-                    file_repo.create(
+                    file_repo.record_outcome(
                         str(file_path), file_hash, "success",
                         bank_name=parser.bank_name,
                         transaction_count=new_count,
@@ -179,11 +187,18 @@ class Pipeline:
                         "Imported %d transaction(s) from %s (%s)",
                         new_count, file_path.name, parser.bank_name,
                     )
+                    if not raw_transactions:
+                        reason = f"{parser.bank_name} parser returned 0 rows"
+                        logger.warning("Empty parse: %s (%s)", file_path.name, reason)
+                        result.empty_parses += 1
+                        result.empty_parse_details.append((file_path.name, reason))
 
                 except Exception as exc:  # noqa: BLE001
                     msg = f"{file_path.name}: {exc}"
                     logger.error("Failed to parse %s", msg)
-                    file_repo.create(str(file_path), file_hash, "error", error_message=str(exc))
+                    file_repo.record_outcome(
+                        str(file_path), file_hash, "error", error_message=str(exc)
+                    )
                     result.errors += 1
                     result.error_details.append(msg)
 

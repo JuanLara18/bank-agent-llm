@@ -159,17 +159,49 @@ class FileProcessingRunRepository:
         self._s = session
 
     def is_processed(self, file_hash: str) -> bool:
-        """Return True if the file should be skipped on the next import run.
+        """Return True only if the file was already imported successfully.
 
-        - "success" → already imported, skip.
-        - "skipped" → no parser exists; re-importing same bytes yields same outcome, skip.
-        - "error"   → parse failed; may succeed after a fix, so retry (return False).
+        Only "success" blocks re-processing. "skipped" (no parser matched) and
+        "error" are retried on the next run so that fixing a parser or adding
+        a new one automatically picks up previously-dropped files.
         """
         stmt = select(FileProcessingRun).where(
             FileProcessingRun.file_hash == file_hash,
-            FileProcessingRun.status.in_(["success", "skipped"]),
+            FileProcessingRun.status == "success",
         )
         return self._s.execute(stmt).scalar_one_or_none() is not None
+
+    def record_outcome(
+        self,
+        file_path: str,
+        file_hash: str,
+        status: str,
+        bank_name: str | None = None,
+        transaction_count: int = 0,
+        error_message: str | None = None,
+    ) -> FileProcessingRun:
+        """Upsert a processing outcome keyed by file_hash.
+
+        Updates the existing row if one exists (so a previously-skipped file
+        that now parses correctly overwrites its own record), else inserts.
+        """
+        existing = self._s.execute(
+            select(FileProcessingRun).where(FileProcessingRun.file_hash == file_hash)
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.file_path = file_path
+            existing.status = status
+            existing.bank_name = bank_name
+            existing.transaction_count = transaction_count
+            existing.error_message = error_message
+            self._s.flush()
+            return existing
+        return self.create(
+            file_path, file_hash, status,
+            bank_name=bank_name,
+            transaction_count=transaction_count,
+            error_message=error_message,
+        )
 
     def create(
         self,
