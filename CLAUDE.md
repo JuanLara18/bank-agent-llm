@@ -19,13 +19,13 @@ All processing is local. No financial data reaches any external API.
 
 ---
 
-## Current state (as of 2026-04-05)
+## Current state (as of 2026-04-10)
 
 | Milestone | Status | Key deliverable |
 |-----------|--------|-----------------|
 | M1 Foundation | ✅ Done | CLI skeleton, DB, config |
 | M2 File Import | ✅ Done | `bank-agent import <path>` |
-| M3 First Parsers | ✅ Done | Bancolombia, Falabella CMR, Scotiabank/DaviBank |
+| M3 First Parsers | ✅ Done | Bancolombia (tarjeta + ahorros), Falabella CMR, Scotiabank/DaviBank |
 | M4 Enrichment | ✅ Done | Rules engine 99.3% coverage, Ollama fallback |
 | M5 Email Ingestion | ✅ Done | Gmail OAuth2 + Outlook IMAP |
 | M6 Status Dashboard | ✅ Done | `bank-agent status` Rich terminal report |
@@ -33,7 +33,10 @@ All processing is local. No financial data reaches any external API.
 | M8 Chat | 🔜 Next | `bank-agent chat` (requires Ollama) |
 | M9 Portability | 🔜 | Docker, Makefile, docs |
 
-**Real data:** 647 transactions loaded (Jul 2025–Mar 2026), 532 tagged by rules (82%), 115 pending Ollama.
+**Real data:** 1696 transactions loaded (Jan 2025–Mar 2026), 807 tagged by rules (48%), 131 tagged by Ollama (8%), 758 pending re-enrichment after latest import.
+
+**Known import gaps** (tracked in `docs/known-gaps.md`):
+- 14 old-format Bancolombia card statements (VISA_2158/MASTERCARD_0542, Feb–Aug 2025) — layout predates the current `_parse_row` grammar. Low priority; not blocking any milestone.
 
 ---
 
