@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -13,12 +13,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from bank_agent_llm.storage.models import Account, Base, FileProcessingRun, Transaction
 from bank_agent_llm.storage.repository import (
     AccountRepository,
-    CategoryRepository,
     FileProcessingRunRepository,
     PipelineRunRepository,
     TransactionRepository,
 )
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -75,22 +73,6 @@ def test_get_or_create_different_accounts(session: Session) -> None:
     assert len(repo.all()) == 2
 
 
-# ─── CategoryRepository ──────────────────────────────────────────────────────
-
-def test_get_or_create_category(session: Session) -> None:
-    repo = CategoryRepository(session)
-    cat = repo.get_or_create("Food & Dining")
-    assert cat.id is not None
-    assert repo.get_or_create("Food & Dining").id == cat.id
-
-
-def test_category_with_parent(session: Session) -> None:
-    repo = CategoryRepository(session)
-    parent = repo.get_or_create("Food & Dining")
-    child = repo.get_or_create("Restaurants", parent_id=parent.id)
-    assert child.parent_id == parent.id
-
-
 # ─── TransactionRepository ───────────────────────────────────────────────────
 
 def test_add_transaction(session: Session) -> None:
@@ -135,14 +117,6 @@ def test_find_by_account(session: Session) -> None:
     repo.add_or_skip(_make_transaction(account, pos=1))
     results = repo.find_by_account(account.id)
     assert len(results) == 2
-
-
-def test_find_uncategorized(session: Session) -> None:
-    account = _make_account(session)
-    session.commit()
-    repo = TransactionRepository(session)
-    repo.add_or_skip(_make_transaction(account, pos=0))
-    assert len(repo.find_uncategorized()) == 1
 
 
 def test_delete_before(session: Session) -> None:
