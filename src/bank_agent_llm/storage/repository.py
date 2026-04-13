@@ -384,6 +384,7 @@ class StatusReport:
     date_max: date | None = None
     total_debit: Decimal = field(default_factory=lambda: Decimal("0"))
     total_credit: Decimal = field(default_factory=lambda: Decimal("0"))
+    total_internal: Decimal = field(default_factory=lambda: Decimal("0"))
     accounts: list[AccountSummary] = field(default_factory=list)
     monthly: list[MonthlySummary] = field(default_factory=list)
     top_tags: list[TagSpending] = field(default_factory=list)
@@ -430,16 +431,29 @@ class StatsRepository:
         report.total_transactions = len(txs)
         report.pending_enrichment = sum(1 for t in txs if t.tag_source == "pending")
 
+        from bank_agent_llm.enrichment.tags import get_taxonomy
+        taxonomy = get_taxonomy()
+
         debits = [t for t in txs if t.direction == "debit"]
         credits = [t for t in txs if t.direction == "credit"]
+
+        # Separate real expenses from internal transfers (pago-tarjeta,
+        # transferencia, cancelada, etc.) so spending metrics are accurate.
+        def _is_expense_debit(t: Transaction) -> bool:
+            primary = taxonomy.primary_tag(t.tags)
+            return not primary or taxonomy.is_expense(primary)
+
+        expense_debits = [t for t in debits if _is_expense_debit(t)]
+        internal_debits = [t for t in debits if not _is_expense_debit(t)]
 
         all_dates = [t.date for t in txs if t.date]
         if all_dates:
             report.date_min = min(all_dates)
             report.date_max = max(all_dates)
 
-        report.total_debit = sum((t.amount for t in debits), Decimal("0"))
+        report.total_debit = sum((t.amount for t in expense_debits), Decimal("0"))
         report.total_credit = sum((t.amount for t in credits), Decimal("0"))
+        report.total_internal = sum((t.amount for t in internal_debits), Decimal("0"))
 
         # ── Per-account summary ───────────────────────────────────────────────
         accounts = list(self._s.execute(select(Account)).scalars())
@@ -475,8 +489,6 @@ class StatsRepository:
         ]
 
         # ── Top tags (expense debits, leaf tags only) ─────────────────────────
-        from bank_agent_llm.enrichment.tags import get_taxonomy
-        taxonomy = get_taxonomy()
         tag_totals: dict[str, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
         for t in txs:
             if t.direction == "debit" and t.tag_source != "pending":
@@ -491,13 +503,12 @@ class StatsRepository:
             reverse=True,
         )[:top_n]
 
-        # ── Top merchants ─────────────────────────────────────────────────────
+        # ── Top merchants (expense debits only) ───────────────────────────────
         merchant_totals: dict[str, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
-        for t in txs:
-            if t.direction == "debit":
-                name = t.merchant_name or t.raw_description[:30]
-                total, cnt = merchant_totals[name]
-                merchant_totals[name] = (total + t.amount, cnt + 1)
+        for t in expense_debits:
+            name = t.merchant_name or t.raw_description[:30]
+            total, cnt = merchant_totals[name]
+            merchant_totals[name] = (total + t.amount, cnt + 1)
         report.top_merchants = sorted(
             [MerchantSpending(merchant=m, total=total, count=cnt)
              for m, (total, cnt) in merchant_totals.items()],
@@ -505,10 +516,10 @@ class StatsRepository:
             reverse=True,
         )[:top_n]
 
-        # ── Spending by day of week (expense debits) ──────────────────────────
+        # ── Spending by day of week (expense debits only) ──────────────────────
         weekday_totals: dict[int, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
-        for t in txs:
-            if t.direction == "debit" and t.date:
+        for t in expense_debits:
+            if t.date:
                 wd = t.date.weekday()  # 0=Monday
                 total, cnt = weekday_totals[wd]
                 weekday_totals[wd] = (total + t.amount, cnt + 1)

@@ -109,6 +109,7 @@ def _load_transactions(
     from bank_agent_llm.storage.database import get_session
     from bank_agent_llm.storage.repository import StatsRepository
     ids = list(account_ids) if account_ids else None
+    _NON_EXPENSE_TAGS = {"pago-tarjeta", "transferencia", "cancelada", "ingreso"}
     with get_session() as s:
         txs = StatsRepository(s).all_transactions(
             date_from=date_from, date_to=date_to,
@@ -128,6 +129,11 @@ def _load_transactions(
                 else "ingreso" if t.direction == "credit" and "ingreso" in (t.tags or [])
                 else "reembolso" if t.direction == "credit"
                 else None
+            ),
+            # Debit classification: internal transfers are not real expenses
+            "is_expense": (
+                t.direction == "debit"
+                and not bool(_NON_EXPENSE_TAGS & set(t.tags or []))
             ),
             "description": t.raw_description,
             "merchant": t.merchant_name or t.raw_description[:35],
@@ -184,42 +190,39 @@ def _tab_resumen(df: pd.DataFrame, accounts: list[dict]) -> None:
         return
 
     debits = df[df["direction"] == "debit"]
+    expense_debits = df[df["is_expense"] == True]  # noqa: E712
+    internal_debits = debits[df["is_expense"] == False]  # noqa: E712
     # Card payments (abonos) vs actual income — semantically different
     card_payments = df[df["credit_type"] == "pago_tarjeta"]
     reembolsos = df[df["credit_type"] == "reembolso"]
     ingresos_reales = df[df["credit_type"] == "ingreso"]
 
     tagged = df[df["tag_source"] != "pending"]
-    expense = debits[debits["primary_tag"] != "sin etiqueta"]
+    expense = expense_debits[expense_debits["primary_tag"] != "sin etiqueta"]
 
-    total_cargos = debits["amount"].sum()
+    total_gastos = expense_debits["amount"].sum()
     total_abonos = card_payments["amount"].sum()
-    # Net balance change for the period: cargos - abonos
-    # Positive = your card balance increased (you owe more)
-    # Negative = you paid down more than you charged
-    saldo_delta = total_cargos - total_abonos
-    avg_monthly = debits.groupby("month")["amount"].sum().mean() if not debits.empty else 0
+    total_internal = internal_debits["amount"].sum()
+    avg_monthly = (
+        expense_debits.groupby("month")["amount"].sum().mean()
+        if not expense_debits.empty else 0
+    )
     pct_tagged = len(tagged) / len(df) * 100 if len(df) else 0
     top_merchant = (
-        debits.groupby("merchant")["amount"].sum().idxmax()
-        if not debits.empty else "—"
+        expense_debits.groupby("merchant")["amount"].sum().idxmax()
+        if not expense_debits.empty else "—"
     )
 
     # ── KPI row ──────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("Total cargos", _cop(total_cargos, compact=True),
-              help="Suma de todos los cargos/compras cobrados a la tarjeta")
-    k2.metric("Total abonos", _cop(total_abonos, compact=True),
-              help="Pagos que hiciste a la tarjeta (ABONO WOMPI/PSE, debito automatico, etc.)")
-    k3.metric(
-        "Saldo acumulado",
-        _cop(saldo_delta, compact=True),
-        delta=f"{'saldo aumentó' if saldo_delta > 0 else 'saldo disminuyó'}",
-        delta_color="inverse",
-        help="Cargos − Abonos. Positivo = deuda creció. Negativo = pagaste más de lo que cargaste.",
-    )
+    k1.metric("Gasto real", _cop(total_gastos, compact=True),
+              help="Cargos/compras reales (excluye pagos a tarjeta y transferencias internas)")
+    k2.metric("Transferencias", _cop(total_internal, compact=True),
+              help="Pagos a tarjeta, transferencias y movimientos internos entre cuentas")
+    k3.metric("Abonos tarjeta", _cop(total_abonos, compact=True),
+              help="Pagos recibidos en la tarjeta (ABONO WOMPI/PSE, debito automatico, etc.)")
     k4.metric("Promedio mensual", _cop(avg_monthly, compact=True),
-              help="Gasto promedio por mes en el periodo filtrado")
+              help="Gasto real promedio por mes en el periodo filtrado")
     k5.metric("Categorizadas", f"{pct_tagged:.0f}%", delta=f"{len(tagged)}/{len(df)} txns")
     k6.metric("Top comercio", top_merchant[:20] if isinstance(top_merchant, str) else "—")
 
@@ -238,19 +241,34 @@ def _tab_resumen(df: pd.DataFrame, accounts: list[dict]) -> None:
 
     st.markdown("---")
 
-    # ── Monthly cargos vs abonos ──────────────────────────────────────────────
+    # ── Monthly gasto real vs transferencias ─────────────────────────────────
     col_left, col_right = st.columns([2, 1])
     with col_left:
-        monthly_d = debits.groupby("month_dt")["amount"].sum().reset_index(name="Cargos")
-        monthly_c = card_payments.groupby("month_dt")["amount"].sum().reset_index(name="Abonos")
-        monthly = monthly_d.merge(monthly_c, on="month_dt", how="outer").fillna(0).sort_values("month_dt")
+        monthly_e = (
+            expense_debits.groupby("month_dt")["amount"].sum()
+            .reset_index(name="Gasto real")
+        )
+        monthly_i = (
+            internal_debits.groupby("month_dt")["amount"].sum()
+            .reset_index(name="Transferencias")
+        )
+        monthly = (
+            monthly_e.merge(monthly_i, on="month_dt", how="outer")
+            .fillna(0).sort_values("month_dt")
+        )
         monthly["mes"] = monthly["month_dt"].dt.strftime("%b %Y")
 
         fig = go.Figure()
-        fig.add_bar(x=monthly["mes"], y=monthly["Abonos"], name="Abonos a tarjeta", marker_color="#42A5F5")
-        fig.add_bar(x=monthly["mes"], y=monthly["Cargos"], name="Cargos / gastos", marker_color="#EF5350")
+        fig.add_bar(
+            x=monthly["mes"], y=monthly["Transferencias"],
+            name="Transferencias internas", marker_color="#42A5F5",
+        )
+        fig.add_bar(
+            x=monthly["mes"], y=monthly["Gasto real"],
+            name="Gasto real", marker_color="#EF5350",
+        )
         fig.update_layout(
-            barmode="group", title="Cargos vs abonos por mes", height=320,
+            barmode="group", title="Gasto real vs transferencias por mes", height=320,
             xaxis_title="", yaxis_title="COP",
             legend=dict(orientation="h", y=1.12),
             margin=dict(t=50, b=30),
