@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -28,7 +28,6 @@ class RawTransaction:
     # amount + date + description are identical (e.g. two coffees same day)
     position_in_statement: int = 0
     # Optional fields that some banks provide
-    transaction_time: time | None = None
     reference: str | None = None
     balance_after: Decimal | None = None
     # Account identifier extracted by the parser (last 4 digits, full number, etc.)

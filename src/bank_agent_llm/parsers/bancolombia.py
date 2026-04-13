@@ -124,7 +124,7 @@ class BancolombiaParser(BankParser):
         except Exception as exc:
             raise ParseError(f"Failed to parse Bancolombia PDF: {exc}") from exc
 
-        return transactions
+        return _dedup_installments(transactions)
 
 
 def _parse_row(
@@ -222,3 +222,45 @@ def _parse_row(
         source_file=source_file,
         position_in_statement=position,
     )
+
+
+def _dedup_installments(txs: list[RawTransaction]) -> list[RawTransaction]:
+    """Remove total-amount rows that duplicate an installment row.
+
+    Bancolombia PDFs list deferred purchases in two places: once in the
+    "compras del periodo" section (total balance) and again in the
+    "diferidos" section (with N/M installment indicator and cuota amount).
+    The installment version is authoritative; the total-amount version is
+    redundant and inflates spending.
+
+    Strategy: for each installment transaction (description ends with N/M),
+    remove any non-installment transaction with the same date and base
+    description (i.e. without the " N/M" suffix).
+    """
+    # Collect base descriptions that have an installment version
+    installment_keys: set[tuple] = set()
+    for tx in txs:
+        m = _INSTALLMENT_RE.search(tx.raw_description.rsplit(" ", 1)[-1])
+        if m:
+            base_desc = tx.raw_description.rsplit(" ", 1)[0]
+            installment_keys.add((tx.date, base_desc))
+
+    if not installment_keys:
+        return txs
+
+    # Keep everything except total-amount rows whose (date, desc) has an
+    # installment counterpart.
+    result = []
+    for tx in txs:
+        has_installment_suffix = _INSTALLMENT_RE.search(
+            tx.raw_description.rsplit(" ", 1)[-1]
+        )
+        if not has_installment_suffix and (tx.date, tx.raw_description) in installment_keys:
+            continue  # drop the total-amount duplicate
+        result.append(tx)
+
+    # Re-number positions so they remain sequential
+    for i, tx in enumerate(result):
+        tx.position_in_statement = i
+
+    return result

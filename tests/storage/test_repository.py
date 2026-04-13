@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from bank_agent_llm.storage.models import Account, Base, Transaction
+from bank_agent_llm.storage.models import Account, Base, FileProcessingRun, Transaction
 from bank_agent_llm.storage.repository import (
     AccountRepository,
-    CategoryRepository,
     FileProcessingRunRepository,
     PipelineRunRepository,
     TransactionRepository,
 )
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -36,17 +34,22 @@ def _make_account(session: Session, bank: str = "TestBank") -> Account:
     return repo.get_or_create(bank_name=bank, account_number="ACC-001")
 
 
-def _make_transaction(account: Account, pos: int = 0, amount: str = "50000.00") -> Transaction:
-    desc = "COMPRA POS TIENDA"
+def _make_transaction(
+    account: Account,
+    pos: int = 0,
+    amount: str = "50000.00",
+    source_file: str = "statement.pdf",
+    description: str = "COMPRA POS TIENDA",
+) -> Transaction:
     return Transaction(
         account_id=account.id,
         date=date(2026, 1, 15),
         amount=Decimal(amount),
         currency="COP",
         direction="debit",
-        raw_description=desc,
-        source_file="statement.pdf",
-        description_hash=hashlib.sha256(desc.encode()).hexdigest(),
+        raw_description=description,
+        source_file=source_file,
+        description_hash=hashlib.sha256(description.encode()).hexdigest(),
         position_in_statement=pos,
     )
 
@@ -73,22 +76,6 @@ def test_get_or_create_different_accounts(session: Session) -> None:
     a2 = repo.get_or_create("BankB", "ACC-002")
     assert a1.id != a2.id
     assert len(repo.all()) == 2
-
-
-# ─── CategoryRepository ──────────────────────────────────────────────────────
-
-def test_get_or_create_category(session: Session) -> None:
-    repo = CategoryRepository(session)
-    cat = repo.get_or_create("Food & Dining")
-    assert cat.id is not None
-    assert repo.get_or_create("Food & Dining").id == cat.id
-
-
-def test_category_with_parent(session: Session) -> None:
-    repo = CategoryRepository(session)
-    parent = repo.get_or_create("Food & Dining")
-    child = repo.get_or_create("Restaurants", parent_id=parent.id)
-    assert child.parent_id == parent.id
 
 
 # ─── TransactionRepository ───────────────────────────────────────────────────
@@ -137,14 +124,6 @@ def test_find_by_account(session: Session) -> None:
     assert len(results) == 2
 
 
-def test_find_uncategorized(session: Session) -> None:
-    account = _make_account(session)
-    session.commit()
-    repo = TransactionRepository(session)
-    repo.add_or_skip(_make_transaction(account, pos=0))
-    assert len(repo.find_uncategorized()) == 1
-
-
 def test_delete_before(session: Session) -> None:
     account = _make_account(session)
     session.commit()
@@ -153,6 +132,69 @@ def test_delete_before(session: Session) -> None:
     deleted = repo.delete_before(date(2026, 2, 1))
     assert deleted == 1
     assert repo.count() == 0
+
+
+def test_cross_file_duplicate_skipped(session: Session) -> None:
+    """Same transaction from a different statement file is a carry-forward dup."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    tx1 = _make_transaction(account, pos=5, source_file="nov_statement.pdf")
+    _, c1 = repo.add_or_skip(tx1)
+    # Same transaction appears in Dec statement at a different position
+    tx2 = _make_transaction(account, pos=12, source_file="dec_statement.pdf")
+    _, c2 = repo.add_or_skip(tx2)
+    assert c1 is True
+    assert c2 is False
+    assert repo.count() == 1
+
+
+def test_same_file_different_position_still_creates_two(session: Session) -> None:
+    """Two coffees same day in the same file must both be stored."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=1, source_file="statement.pdf")
+    )
+    assert c1 is True
+    assert c2 is True
+    assert repo.count() == 2
+
+
+def test_reimport_same_file_skipped(session: Session) -> None:
+    """Re-importing the exact same file skips existing transactions."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    assert c1 is True
+    assert c2 is False
+    assert repo.count() == 1
+
+
+def test_different_description_cross_file_creates_both(session: Session) -> None:
+    """Different transactions from different files are not false-positive deduped."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="nov.pdf", description="STARBUCKS")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="dec.pdf", description="UBER EATS")
+    )
+    assert c1 is True
+    assert c2 is True
+    assert repo.count() == 2
 
 
 # ─── FileProcessingRunRepository ─────────────────────────────────────────────
@@ -172,6 +214,36 @@ def test_errored_file_not_considered_processed(session: Session) -> None:
     repo = FileProcessingRunRepository(session)
     repo.create("bad.pdf", "def456", "error", error_message="parse failed")
     assert repo.is_processed("def456") is False
+
+
+def test_skipped_file_is_retried_on_next_run(session: Session) -> None:
+    """A file previously marked 'skipped' must be retried so that parser fixes
+    automatically pick up previously-dropped statements."""
+    repo = FileProcessingRunRepository(session)
+    repo.create("unknown.pdf", "ghi789", "skipped", error_message="no parser matched")
+    assert repo.is_processed("ghi789") is False
+
+
+def test_record_outcome_upserts_by_hash(session: Session) -> None:
+    """record_outcome updates the existing row for a hash instead of raising
+    on the unique constraint — so a retry after a parser fix overwrites the
+    previous 'skipped' outcome."""
+    repo = FileProcessingRunRepository(session)
+    repo.record_outcome("old.pdf", "hash1", "skipped", error_message="no parser matched")
+    repo.record_outcome(
+        "new.pdf", "hash1", "success",
+        bank_name="TestBank", transaction_count=42,
+    )
+    assert repo.is_processed("hash1") is True
+    rows = list(session.execute(select(FileProcessingRun).where(
+        FileProcessingRun.file_hash == "hash1"
+    )).scalars())
+    assert len(rows) == 1
+    assert rows[0].status == "success"
+    assert rows[0].bank_name == "TestBank"
+    assert rows[0].transaction_count == 42
+    assert rows[0].error_message is None
+    assert rows[0].file_path == "new.pdf"
 
 
 # ─── PipelineRunRepository ────────────────────────────────────────────────────

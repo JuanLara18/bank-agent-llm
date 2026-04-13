@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bank_agent_llm.parsers.base import BankParser, ParseError
-
 from bank_agent_llm.parsers.bancolombia import BancolombiaParser
+from bank_agent_llm.parsers.bancolombia_savings import BancolombiaSavingsParser
+from bank_agent_llm.parsers.base import BankParser, ParseError
 from bank_agent_llm.parsers.falabella import FalabellaParser
 from bank_agent_llm.parsers.scotiabank import ScotiabankParser
 
 # Parser classes registered in priority order (more specific signatures first).
+# BancolombiaSavingsParser goes before BancolombiaParser because the savings
+# layout is distinct and its signature is more specific.
 # ParserFactory instantiates them with passwords at call time.
 _PARSER_CLASSES = [
+    BancolombiaSavingsParser,
     BancolombiaParser,
     FalabellaParser,
     ScotiabankParser,
@@ -29,11 +32,17 @@ class UnsupportedBankError(ParseError):
         )
 
 
-def _extract_pdf_hint(file_path: Path, passwords: list[str] | None = None) -> str:
-    """Extract first-page text from a PDF for use as a parser hint.
+_HINT_MAX_PAGES = 3
 
-    Tries without password first. If the PDF is encrypted, attempts each
-    password in order until one succeeds. Returns empty string on failure.
+
+def _extract_pdf_hint(file_path: Path, passwords: list[str] | None = None) -> str:
+    """Extract text from the first few pages of a PDF for use as a parser hint.
+
+    Reads up to ``_HINT_MAX_PAGES`` pages so that signature strings which
+    occasionally get pushed past page 1 (e.g. the Bancolombia footer on
+    long savings statements) still appear in the hint. Tries without a
+    password first, then each configured password in order for encrypted
+    PDFs. Returns empty string on any failure.
 
     Extracted once per file so parsers don't reopen the document.
     """
@@ -50,8 +59,12 @@ def _extract_pdf_hint(file_path: Path, passwords: list[str] | None = None) -> st
                 with pdfplumber.open(file_path, **kwargs) as pdf:  # type: ignore[arg-type]
                     if not pdf.pages:
                         return ""
-                    text = pdf.pages[0].extract_text() or ""
-                    if text:
+                    parts = [
+                        page.extract_text() or ""
+                        for page in pdf.pages[:_HINT_MAX_PAGES]
+                    ]
+                    text = "\n".join(parts)
+                    if text.strip():
                         return text
             except Exception:  # noqa: BLE001
                 continue

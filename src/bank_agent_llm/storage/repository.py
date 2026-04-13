@@ -8,19 +8,16 @@ the session's lifetime (request, pipeline run, etc.).
 from __future__ import annotations
 
 import hashlib
-from datetime import date
-
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bank_agent_llm.storage.models import (
     Account,
-    Category,
     FileProcessingRun,
     MerchantCache,
     PipelineRun,
@@ -65,25 +62,6 @@ class AccountRepository:
         return list(self._s.execute(select(Account)).scalars())
 
 
-# ─── Category ────────────────────────────────────────────────────────────────
-
-class CategoryRepository:
-    def __init__(self, session: Session) -> None:
-        self._s = session
-
-    def get_or_create(self, name: str, parent_id: int | None = None) -> Category:
-        stmt = select(Category).where(Category.name == name)
-        category = self._s.execute(stmt).scalar_one_or_none()
-        if category is None:
-            category = Category(name=name, parent_id=parent_id)
-            self._s.add(category)
-            self._s.flush()
-        return category
-
-    def all(self) -> list[Category]:
-        return list(self._s.execute(select(Category)).scalars())
-
-
 # ─── Transaction ─────────────────────────────────────────────────────────────
 
 class TransactionRepository:
@@ -93,29 +71,46 @@ class TransactionRepository:
     def add_or_skip(self, transaction: Transaction) -> tuple[Transaction, bool]:
         """Insert a transaction, skipping if the dedup constraint would fire.
 
+        Two-phase dedup:
+        1. Cross-file — same (account, date, amount, description_hash) already
+           exists from a *different* source file → skip.  This catches credit-card
+           statements that carry forward prior-month transactions.
+        2. Same-file — full 5-tuple match (includes position_in_statement) →
+           skip.  Handles re-import of the exact same file.
+
         Returns:
             (transaction, created) — created is False if it was a duplicate.
         """
-        stmt = select(Transaction).where(
+        # Phase 1: cross-file dedup
+        stmt_cross = select(Transaction).where(
+            Transaction.account_id == transaction.account_id,
+            Transaction.date == transaction.date,
+            Transaction.amount == transaction.amount,
+            Transaction.description_hash == transaction.description_hash,
+            Transaction.source_file != transaction.source_file,
+        )
+        cross_hit = self._s.execute(stmt_cross).scalars().first()
+        if cross_hit is not None:
+            return cross_hit, False
+
+        # Phase 2: same-file dedup (position discriminates two coffees same day)
+        stmt_same = select(Transaction).where(
             Transaction.account_id == transaction.account_id,
             Transaction.date == transaction.date,
             Transaction.amount == transaction.amount,
             Transaction.description_hash == transaction.description_hash,
             Transaction.position_in_statement == transaction.position_in_statement,
         )
-        existing = self._s.execute(stmt).scalar_one_or_none()
+        existing = self._s.execute(stmt_same).scalar_one_or_none()
         if existing:
             return existing, False
+
         self._s.add(transaction)
         self._s.flush()
         return transaction, True
 
     def find_by_account(self, account_id: int) -> list[Transaction]:
         stmt = select(Transaction).where(Transaction.account_id == account_id)
-        return list(self._s.execute(stmt).scalars())
-
-    def find_uncategorized(self) -> list[Transaction]:
-        stmt = select(Transaction).where(Transaction.category_id.is_(None))
         return list(self._s.execute(stmt).scalars())
 
     def count(self) -> int:
@@ -159,17 +154,49 @@ class FileProcessingRunRepository:
         self._s = session
 
     def is_processed(self, file_hash: str) -> bool:
-        """Return True if the file should be skipped on the next import run.
+        """Return True only if the file was already imported successfully.
 
-        - "success" → already imported, skip.
-        - "skipped" → no parser exists; re-importing same bytes yields same outcome, skip.
-        - "error"   → parse failed; may succeed after a fix, so retry (return False).
+        Only "success" blocks re-processing. "skipped" (no parser matched) and
+        "error" are retried on the next run so that fixing a parser or adding
+        a new one automatically picks up previously-dropped files.
         """
         stmt = select(FileProcessingRun).where(
             FileProcessingRun.file_hash == file_hash,
-            FileProcessingRun.status.in_(["success", "skipped"]),
+            FileProcessingRun.status == "success",
         )
         return self._s.execute(stmt).scalar_one_or_none() is not None
+
+    def record_outcome(
+        self,
+        file_path: str,
+        file_hash: str,
+        status: str,
+        bank_name: str | None = None,
+        transaction_count: int = 0,
+        error_message: str | None = None,
+    ) -> FileProcessingRun:
+        """Upsert a processing outcome keyed by file_hash.
+
+        Updates the existing row if one exists (so a previously-skipped file
+        that now parses correctly overwrites its own record), else inserts.
+        """
+        existing = self._s.execute(
+            select(FileProcessingRun).where(FileProcessingRun.file_hash == file_hash)
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.file_path = file_path
+            existing.status = status
+            existing.bank_name = bank_name
+            existing.transaction_count = transaction_count
+            existing.error_message = error_message
+            self._s.flush()
+            return existing
+        return self.create(
+            file_path, file_hash, status,
+            bank_name=bank_name,
+            transaction_count=transaction_count,
+            error_message=error_message,
+        )
 
     def create(
         self,
@@ -357,6 +384,7 @@ class StatusReport:
     date_max: date | None = None
     total_debit: Decimal = field(default_factory=lambda: Decimal("0"))
     total_credit: Decimal = field(default_factory=lambda: Decimal("0"))
+    total_internal: Decimal = field(default_factory=lambda: Decimal("0"))
     accounts: list[AccountSummary] = field(default_factory=list)
     monthly: list[MonthlySummary] = field(default_factory=list)
     top_tags: list[TagSpending] = field(default_factory=list)
@@ -403,16 +431,29 @@ class StatsRepository:
         report.total_transactions = len(txs)
         report.pending_enrichment = sum(1 for t in txs if t.tag_source == "pending")
 
+        from bank_agent_llm.enrichment.tags import get_taxonomy
+        taxonomy = get_taxonomy()
+
         debits = [t for t in txs if t.direction == "debit"]
         credits = [t for t in txs if t.direction == "credit"]
+
+        # Separate real expenses from internal transfers (pago-tarjeta,
+        # transferencia, cancelada, etc.) so spending metrics are accurate.
+        def _is_expense_debit(t: Transaction) -> bool:
+            primary = taxonomy.primary_tag(t.tags)
+            return not primary or taxonomy.is_expense(primary)
+
+        expense_debits = [t for t in debits if _is_expense_debit(t)]
+        internal_debits = [t for t in debits if not _is_expense_debit(t)]
 
         all_dates = [t.date for t in txs if t.date]
         if all_dates:
             report.date_min = min(all_dates)
             report.date_max = max(all_dates)
 
-        report.total_debit = sum((t.amount for t in debits), Decimal("0"))
+        report.total_debit = sum((t.amount for t in expense_debits), Decimal("0"))
         report.total_credit = sum((t.amount for t in credits), Decimal("0"))
+        report.total_internal = sum((t.amount for t in internal_debits), Decimal("0"))
 
         # ── Per-account summary ───────────────────────────────────────────────
         accounts = list(self._s.execute(select(Account)).scalars())
@@ -448,8 +489,6 @@ class StatsRepository:
         ]
 
         # ── Top tags (expense debits, leaf tags only) ─────────────────────────
-        from bank_agent_llm.enrichment.tags import get_taxonomy
-        taxonomy = get_taxonomy()
         tag_totals: dict[str, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
         for t in txs:
             if t.direction == "debit" and t.tag_source != "pending":
@@ -464,13 +503,12 @@ class StatsRepository:
             reverse=True,
         )[:top_n]
 
-        # ── Top merchants ─────────────────────────────────────────────────────
+        # ── Top merchants (expense debits only) ───────────────────────────────
         merchant_totals: dict[str, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
-        for t in txs:
-            if t.direction == "debit":
-                name = t.merchant_name or t.raw_description[:30]
-                total, cnt = merchant_totals[name]
-                merchant_totals[name] = (total + t.amount, cnt + 1)
+        for t in expense_debits:
+            name = t.merchant_name or t.raw_description[:30]
+            total, cnt = merchant_totals[name]
+            merchant_totals[name] = (total + t.amount, cnt + 1)
         report.top_merchants = sorted(
             [MerchantSpending(merchant=m, total=total, count=cnt)
              for m, (total, cnt) in merchant_totals.items()],
@@ -478,10 +516,10 @@ class StatsRepository:
             reverse=True,
         )[:top_n]
 
-        # ── Spending by day of week (expense debits) ──────────────────────────
+        # ── Spending by day of week (expense debits only) ──────────────────────
         weekday_totals: dict[int, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
-        for t in txs:
-            if t.direction == "debit" and t.date:
+        for t in expense_debits:
+            if t.date:
                 wd = t.date.weekday()  # 0=Monday
                 total, cnt = weekday_totals[wd]
                 weekday_totals[wd] = (total + t.amount, cnt + 1)

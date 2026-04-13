@@ -226,7 +226,10 @@ def status(
     overview.add_column()
     overview.add_row("Transacciones", str(report.total_transactions))
     overview.add_row("Período", date_range)
-    overview.add_row("Gasto total", f"[red]{_cop(report.total_debit)}[/red]")
+    overview.add_row("Gasto real", f"[red]{_cop(report.total_debit)}[/red]")
+    if report.total_internal:
+        internal_fmt = f"[yellow]{_cop(report.total_internal)}[/yellow]"
+        overview.add_row("Transferencias internas", internal_fmt)
     overview.add_row("Ingresos / pagos", f"[green]{_cop(report.total_credit)}[/green]")
     overview.add_row(
         "Categorizadas",
@@ -390,17 +393,25 @@ def import_files(
     table.add_row("Transactions imported", f"[green]{result.imported}[/green]")
     table.add_row("Skipped (already imported)", str(result.skipped_dedup))
     table.add_row("Skipped (no parser)", str(result.skipped_no_parser))
+    table.add_row("Empty parses (0 rows)", str(result.empty_parses))
     table.add_row("Errors", f"[red]{result.errors}[/red]" if result.errors else "0")
     console.print(table)
 
     for detail in result.error_details:
         err_console.print(f"  [red]•[/red] {detail}")
 
-    if result.skipped_no_parser:
+    if result.skipped_details:
+        console.print("[yellow]Skipped files (no parser matched):[/yellow]")
+        for name, reason in result.skipped_details:
+            console.print(f"  [yellow]•[/yellow] {name} — {reason}")
         console.print(
-            f"[yellow]{result.skipped_no_parser} file(s) had no matching parser. "
-            "See docs/adding-a-parser.md.[/yellow]"
+            "[yellow]See docs/adding-a-parser.md to add support for a new bank.[/yellow]"
         )
+
+    if result.empty_parse_details:
+        console.print("[yellow]Files parsed but no transactions extracted:[/yellow]")
+        for name, reason in result.empty_parse_details:
+            console.print(f"  [yellow]•[/yellow] {name} — {reason}")
 
     if not result.success:
         raise typer.Exit(1)
