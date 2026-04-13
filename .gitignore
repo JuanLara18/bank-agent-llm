@@ -23,6 +23,8 @@ ENV/
 !.env.example
 config/config.yaml
 !config/config.example.yaml
+config/gmail_credentials.json
+config/gmail_token.json
 
 # Database
 *.db
