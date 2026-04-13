@@ -7,8 +7,10 @@ from decimal import Decimal
 
 import pytest
 
-from bank_agent_llm.parsers.bancolombia import BancolombiaParser, _parse_row, _untriple, _extract_card_digits
-from bank_agent_llm.parsers.base import TransactionDirection
+from bank_agent_llm.parsers.bancolombia import (
+    BancolombiaParser, _dedup_installments, _parse_row, _untriple, _extract_card_digits,
+)
+from bank_agent_llm.parsers.base import RawTransaction, TransactionDirection
 
 
 # ── can_parse ─────────────────────────────────────────────────────────────────
@@ -177,3 +179,61 @@ def test_extract_card_digits_no_match() -> None:
 
 def test_bank_name() -> None:
     assert BancolombiaParser().bank_name == "Bancolombia"
+
+
+# ── _dedup_installments ─────────────────────────────────────────────────────
+
+def _raw(desc: str, amount: str = "100000", pos: int = 0) -> RawTransaction:
+    return RawTransaction(
+        date=date(2025, 12, 2),
+        amount=Decimal(amount),
+        direction=TransactionDirection.DEBIT,
+        raw_description=desc,
+        bank_name="Bancolombia",
+        source_file="test.pdf",
+        position_in_statement=pos,
+    )
+
+
+def test_dedup_installments_removes_total_row() -> None:
+    """When an installment version exists, the total-amount row is dropped."""
+    txs = [
+        _raw("COURSERA.ORG", "109674.50", pos=0),      # total — should be removed
+        _raw("COURSERA.ORG 3/36", "3046.51", pos=1),    # installment — kept
+    ]
+    result = _dedup_installments(txs)
+    assert len(result) == 1
+    assert result[0].raw_description == "COURSERA.ORG 3/36"
+
+
+def test_dedup_installments_keeps_non_installment() -> None:
+    """Regular purchases without installments are not affected."""
+    txs = [
+        _raw("UBER EATS", "25000", pos=0),
+        _raw("STARBUCKS", "12000", pos=1),
+    ]
+    result = _dedup_installments(txs)
+    assert len(result) == 2
+
+
+def test_dedup_installments_keeps_unrelated_same_date() -> None:
+    """A different merchant on the same date is not confused for a total row."""
+    txs = [
+        _raw("APPLE.COM/BILL", "4500", pos=0),
+        _raw("COURSERA.ORG 3/36", "3046.51", pos=1),
+    ]
+    result = _dedup_installments(txs)
+    assert len(result) == 2
+
+
+def test_dedup_installments_renumbers_positions() -> None:
+    """Positions are re-numbered after dedup to stay sequential."""
+    txs = [
+        _raw("COURSERA.ORG", "109674.50", pos=0),
+        _raw("COURSERA.ORG 3/36", "3046.51", pos=1),
+        _raw("UBER EATS", "25000", pos=2),
+    ]
+    result = _dedup_installments(txs)
+    assert len(result) == 2
+    assert result[0].position_in_statement == 0
+    assert result[1].position_in_statement == 1
