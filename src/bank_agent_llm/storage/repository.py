@@ -504,14 +504,19 @@ class StatsRepository:
         )[:top_n]
 
         # ── Top merchants (expense debits only) ───────────────────────────────
+        # Normalize casing so LLM variants ("NEQUI" vs "Nequi") group together.
         merchant_totals: dict[str, tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
+        _display: dict[str, str] = {}  # key(lower) -> first Title-Case seen
         for t in expense_debits:
             name = t.merchant_name or t.raw_description[:30]
-            total, cnt = merchant_totals[name]
-            merchant_totals[name] = (total + t.amount, cnt + 1)
+            key = name.strip().lower()
+            if key not in _display:
+                _display[key] = name.strip()
+            total, cnt = merchant_totals[key]
+            merchant_totals[key] = (total + t.amount, cnt + 1)
         report.top_merchants = sorted(
-            [MerchantSpending(merchant=m, total=total, count=cnt)
-             for m, (total, cnt) in merchant_totals.items()],
+            [MerchantSpending(merchant=_display[key], total=total, count=cnt)
+             for key, (total, cnt) in merchant_totals.items()],
             key=lambda x: x.total,
             reverse=True,
         )[:top_n]
