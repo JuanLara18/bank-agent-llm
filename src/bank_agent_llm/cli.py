@@ -226,7 +226,10 @@ def status(
     overview.add_column()
     overview.add_row("Transacciones", str(report.total_transactions))
     overview.add_row("Período", date_range)
-    overview.add_row("Gasto total", f"[red]{_cop(report.total_debit)}[/red]")
+    overview.add_row("Gasto real", f"[red]{_cop(report.total_debit)}[/red]")
+    if report.total_internal:
+        internal_fmt = f"[yellow]{_cop(report.total_internal)}[/yellow]"
+        overview.add_row("Transferencias internas", internal_fmt)
     overview.add_row("Ingresos / pagos", f"[green]{_cop(report.total_credit)}[/green]")
     overview.add_row(
         "Categorizadas",
