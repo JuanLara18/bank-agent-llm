@@ -136,7 +136,7 @@ def _load_transactions(
                 and not bool(_NON_EXPENSE_TAGS & set(t.tags or []))
             ),
             "description": t.raw_description,
-            "merchant": t.merchant_name or t.raw_description[:35],
+            "merchant": (t.merchant_name or t.raw_description[:35]).strip(),
             "tags_raw": list(t.tags) if t.tags else [],
             "primary_tag": _primary(list(t.tags) if t.tags else []),
             "parent_tag": _parent(list(t.tags) if t.tags else []),
@@ -145,6 +145,14 @@ def _load_transactions(
         } for t in txs]
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if not df.empty:
+        # Normalize merchant names so casing variants ("NEQUI" / "Nequi") group
+        # together.  Keep the first form seen (usually the most common).
+        _canon: dict[str, str] = {}
+        for m in df["merchant"]:
+            key = m.lower()
+            if key not in _canon:
+                _canon[key] = m
+        df["merchant"] = df["merchant"].map(lambda m: _canon[m.lower()])
         df["date"] = pd.to_datetime(df["date"])
         df["primary_display"] = df["primary_tag"].apply(_display)
         df["parent_display"] = df["parent_tag"].apply(_display)

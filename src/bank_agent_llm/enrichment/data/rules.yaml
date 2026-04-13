@@ -25,12 +25,32 @@ rules:
       - "PPAAGGOO TTAARRJJEETTAA"   # Falabella double-encoded
       - "PAGO DE TARJETA"
 
+  - tags: [pago-tarjeta]
+    merchant: "Pago a Tarjeta"
+    direction: debit
+    patterns:
+      - "PAGO SUC VIRT TC"          # Bancolombia ahorros → TC Visa/Master
+      - "PAGO AUTOM TC"             # Pago automático de tarjeta
+
   - tags: [transferencia]
     merchant: "Transferencia Saliente"
     direction: credit
     patterns:
       - "TRANSF. A"
       - "TRANSFERENCIA"
+
+  - tags: [transferencia]
+    merchant: "Nequi"
+    direction: debit
+    patterns:
+      - "TRANSFERENCIA A NEQUI"
+      - "TRANSFERENCIAS A NEQUI"
+
+  - tags: [transferencia]
+    merchant: "Transferencia Virtual"
+    direction: debit
+    patterns:
+      - "TRANSFERENCIA CTA SUC VIRTUAL"
 
   - tags: [ingreso]
     merchant: "Devolución / Ingreso"
@@ -55,10 +75,16 @@ rules:
       - "INTERESES MORA"
       - "INTERESES DE MORA"
 
+  - tags: [banco, intereses]
+    merchant: "Ajuste Intereses"
+    patterns:
+      - "AJUSTE INTERES"
+
   - tags: [banco, cuota-manejo]
     merchant: "Cuota de Manejo"
     patterns:
       - "CUOTA DE MANEJO"
+      - "CUOTA MANEJO TRJ"
       - "CUOTA POR EMISION"
       - "CUOTAS DE MANEJO"
       - "ADMINISTRACION TARJETA"
@@ -73,6 +99,7 @@ rules:
     merchant: "Seguro Bancario"
     patterns:
       - "POLIZA CARDIF"
+      - "CARDIF S.A."
       - "COBRO SEGURO VIDA"
       - "RECAUDO POLIZA"
       - "SEGURO VIDA DEUDOR"
@@ -266,6 +293,7 @@ rules:
       - "YOUTUBE"
       - "GOOGLE *PLAY"
       - "GOOGLE*PLAY"
+      - "DLO*GOOGLE"
 
   - tags: [entretenimiento, streaming]
     merchant: "Disney+"
@@ -326,12 +354,23 @@ rules:
     patterns:
       - "OPENAI"
 
+  - tags: [tech, software]
+    merchant: "GitHub"
+    patterns:
+      - "GITHUB"
+
+  - tags: [tech, software]
+    merchant: "Anthropic"
+    patterns:
+      - "ANTHROPIC"
+
   # ── Telefonía e Internet ──────────────────────────────────────────────────────
 
   - tags: [tech, telefonia]
     merchant: "Movistar"
     patterns:
       - "MOVISTAR"
+      - "COLOMBIA TELECOMUNI"
 
   - tags: [tech, telefonia]
     merchant: "Claro"
@@ -352,6 +391,11 @@ rules:
       - " WOM "
 
   # ── Hogar ─────────────────────────────────────────────────────────────────────
+
+  - tags: [hogar, servicios-publicos]
+    merchant: "Enel Colombia"
+    patterns:
+      - "ENEL COLOMBIA"
 
   - tags: [hogar, servicios-publicos]
     merchant: "Servicios Públicos"
@@ -391,7 +435,7 @@ rules:
       - "MEDICO"
       - "CONSULTORIO"
 
-  # ── Compra botón PSE (no especificado) ────────────────────────────────────────
+  # ── Compra/Pago PSE ────────────────────────────────────────────────────────────
 
   - tags: [transferencia]
     merchant: "Compra PSE"
@@ -399,6 +443,13 @@ rules:
     patterns:
       - "COMPRA BOTON PSE"
       - "BOTÓN PSE"
+      - "PAGO PSE PAGOS ELECTRONICOS"
+      - "PAGO PSE AVAL"
+
+  - tags: [entretenimiento, cine]
+    merchant: "Cinemark"
+    patterns:
+      - "CINEMARK"
 
   # ── Educación ─────────────────────────────────────────────────────────────────
 
@@ -436,6 +487,7 @@ rules:
     merchant: "Mercado Pago"
     patterns:
       - "MERCADO PAGO"
+      - "MERCADOPAGO"
 
   - tags: [transporte, uber]
     merchant: "Uber (PayU)"
@@ -443,6 +495,17 @@ rules:
       - "PAYU UBER"
 
   # ── Restaurantes adicionales ──────────────────────────────────────────────────
+
+  - tags: [comida, restaurante]
+    merchant: "JR Parrilla"
+    patterns:
+      - "JR PARRILLA"
+      - "PARRILLA JR"
+
+  - tags: [comida, restaurante]
+    merchant: "Frisby"
+    patterns:
+      - "FRISBY"
 
   - tags: [comida, restaurante]
     merchant: "Restaurante"
