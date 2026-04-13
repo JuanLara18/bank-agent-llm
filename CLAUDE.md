@@ -19,7 +19,7 @@ All processing is local. No financial data reaches any external API.
 
 ---
 
-## Current state (as of 2026-04-10)
+## Current state (as of 2026-04-12, v0.1.1)
 
 | Milestone | Status | Key deliverable |
 |-----------|--------|-----------------|
@@ -33,7 +33,7 @@ All processing is local. No financial data reaches any external API.
 | M8 Chat | 🔜 Next | `bank-agent chat` (requires Ollama) |
 | M9 Portability | 🔜 | Docker, Makefile, docs |
 
-**Real data:** 1696 transactions loaded (Jan 2025–Mar 2026), 807 tagged by rules (48%), 131 tagged by Ollama (8%), 758 pending re-enrichment after latest import.
+**Real data:** 1637 unique transactions (Jan 2025–Mar 2026) after v0.1.1 dedup cleanup. 807 tagged by rules (49%), 131 tagged by Ollama (8%), 699 pending re-enrichment after latest import.
 
 **Known import gaps** (tracked in `docs/known-gaps.md`):
 - 14 old-format Bancolombia card statements (VISA_2158/MASTERCARD_0542, Feb–Aug 2025) — layout predates the current `_parse_row` grammar. Low priority; not blocking any milestone.
@@ -162,8 +162,11 @@ Gmail: institutional Google Workspace accounts (`@unal.edu.co`) require OAuth2. 
 - All DB access via the repository layer (`src/storage/repository.py`)
 - Schema changes via Alembic only — never modify tables directly
 - Unique constraint on transactions: `(account_id, date, amount, description_hash, position_in_statement)`
+- **Transaction dedup is two-phase** (v0.1.1): cross-file dedup by `(account_id, date, amount, description_hash)` ignoring position, then same-file dedup including `position_in_statement`. This handles credit card statements that carry forward prior-month transactions.
+- **Spending metrics** exclude tags with `is_expense: false` (`pago-tarjeta`, `transferencia`, `cancelada`, `ingreso`). The `build_report()` and dashboard filter these as internal transfers.
 - `tag_source` values: `pending | keyword_rule | direction_rule | llm | llm_cache | manual`
 - Chat interface (M8) must use a **read-only** SQLAlchemy connection
+- Migrations: 001 initial, 002 enrichment fields, 003 pipeline runs, 004 cross-file dedup cleanup, 005 remove empty accounts
 
 ---
 
@@ -180,6 +183,15 @@ Gmail: institutional Google Workspace accounts (`@unal.edu.co`) require OAuth2. 
 | `refactor/<name>` | Behaviour-neutral changes |
 
 Commit format: `type: short description` — types: `feat fix docs chore test refactor`
+
+**Git workflow:**
+1. Always work on `develop` — create topic branches from it (`fix/thing`, `feat/thing`, etc.)
+2. One logical change per branch, one commit per branch (squash if needed)
+3. Merge to `develop` with `--no-ff` to preserve branch history
+4. Delete topic branches after merge (local and remote)
+5. For releases: merge `develop` → `main` with `--no-ff`, tag on `main`, then sync `develop` back
+6. Simple commit messages — no `Co-Authored-By`, no emoji, just `type: description`
+7. Verify each git step before proceeding — never batch destructive operations
 
 ---
 
