@@ -34,17 +34,22 @@ def _make_account(session: Session, bank: str = "TestBank") -> Account:
     return repo.get_or_create(bank_name=bank, account_number="ACC-001")
 
 
-def _make_transaction(account: Account, pos: int = 0, amount: str = "50000.00") -> Transaction:
-    desc = "COMPRA POS TIENDA"
+def _make_transaction(
+    account: Account,
+    pos: int = 0,
+    amount: str = "50000.00",
+    source_file: str = "statement.pdf",
+    description: str = "COMPRA POS TIENDA",
+) -> Transaction:
     return Transaction(
         account_id=account.id,
         date=date(2026, 1, 15),
         amount=Decimal(amount),
         currency="COP",
         direction="debit",
-        raw_description=desc,
-        source_file="statement.pdf",
-        description_hash=hashlib.sha256(desc.encode()).hexdigest(),
+        raw_description=description,
+        source_file=source_file,
+        description_hash=hashlib.sha256(description.encode()).hexdigest(),
         position_in_statement=pos,
     )
 
@@ -127,6 +132,69 @@ def test_delete_before(session: Session) -> None:
     deleted = repo.delete_before(date(2026, 2, 1))
     assert deleted == 1
     assert repo.count() == 0
+
+
+def test_cross_file_duplicate_skipped(session: Session) -> None:
+    """Same transaction from a different statement file is a carry-forward dup."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    tx1 = _make_transaction(account, pos=5, source_file="nov_statement.pdf")
+    _, c1 = repo.add_or_skip(tx1)
+    # Same transaction appears in Dec statement at a different position
+    tx2 = _make_transaction(account, pos=12, source_file="dec_statement.pdf")
+    _, c2 = repo.add_or_skip(tx2)
+    assert c1 is True
+    assert c2 is False
+    assert repo.count() == 1
+
+
+def test_same_file_different_position_still_creates_two(session: Session) -> None:
+    """Two coffees same day in the same file must both be stored."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=1, source_file="statement.pdf")
+    )
+    assert c1 is True
+    assert c2 is True
+    assert repo.count() == 2
+
+
+def test_reimport_same_file_skipped(session: Session) -> None:
+    """Re-importing the exact same file skips existing transactions."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="statement.pdf")
+    )
+    assert c1 is True
+    assert c2 is False
+    assert repo.count() == 1
+
+
+def test_different_description_cross_file_creates_both(session: Session) -> None:
+    """Different transactions from different files are not false-positive deduped."""
+    account = _make_account(session)
+    session.commit()
+    repo = TransactionRepository(session)
+    _, c1 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="nov.pdf", description="STARBUCKS")
+    )
+    _, c2 = repo.add_or_skip(
+        _make_transaction(account, pos=0, source_file="dec.pdf", description="UBER EATS")
+    )
+    assert c1 is True
+    assert c2 is True
+    assert repo.count() == 2
 
 
 # ─── FileProcessingRunRepository ─────────────────────────────────────────────
