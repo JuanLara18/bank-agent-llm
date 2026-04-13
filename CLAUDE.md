@@ -166,7 +166,8 @@ Gmail: institutional Google Workspace accounts (`@unal.edu.co`) require OAuth2. 
 - **Spending metrics** exclude tags with `is_expense: false` (`pago-tarjeta`, `transferencia`, `cancelada`, `ingreso`). The `build_report()` and dashboard filter these as internal transfers.
 - `tag_source` values: `pending | keyword_rule | direction_rule | llm | llm_cache | manual`
 - Chat interface (M8) must use a **read-only** SQLAlchemy connection
-- Migrations: 001 initial, 002 enrichment fields, 003 pipeline runs, 004 cross-file dedup cleanup, 005 remove empty accounts
+- **Merchant normalization**: keyword rules catch common patterns deterministically; `build_report()` and dashboard normalize casing so LLM variants group together.
+- Migrations: 001 initial, 002 enrichment fields, 003 pipeline runs, 004 cross-file dedup cleanup, 005 remove empty accounts, 006 reset fragmented merchants
 
 ---
 
