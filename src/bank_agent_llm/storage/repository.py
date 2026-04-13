@@ -71,19 +71,40 @@ class TransactionRepository:
     def add_or_skip(self, transaction: Transaction) -> tuple[Transaction, bool]:
         """Insert a transaction, skipping if the dedup constraint would fire.
 
+        Two-phase dedup:
+        1. Cross-file — same (account, date, amount, description_hash) already
+           exists from a *different* source file → skip.  This catches credit-card
+           statements that carry forward prior-month transactions.
+        2. Same-file — full 5-tuple match (includes position_in_statement) →
+           skip.  Handles re-import of the exact same file.
+
         Returns:
             (transaction, created) — created is False if it was a duplicate.
         """
-        stmt = select(Transaction).where(
+        # Phase 1: cross-file dedup
+        stmt_cross = select(Transaction).where(
+            Transaction.account_id == transaction.account_id,
+            Transaction.date == transaction.date,
+            Transaction.amount == transaction.amount,
+            Transaction.description_hash == transaction.description_hash,
+            Transaction.source_file != transaction.source_file,
+        )
+        cross_hit = self._s.execute(stmt_cross).scalars().first()
+        if cross_hit is not None:
+            return cross_hit, False
+
+        # Phase 2: same-file dedup (position discriminates two coffees same day)
+        stmt_same = select(Transaction).where(
             Transaction.account_id == transaction.account_id,
             Transaction.date == transaction.date,
             Transaction.amount == transaction.amount,
             Transaction.description_hash == transaction.description_hash,
             Transaction.position_in_statement == transaction.position_in_statement,
         )
-        existing = self._s.execute(stmt).scalar_one_or_none()
+        existing = self._s.execute(stmt_same).scalar_one_or_none()
         if existing:
             return existing, False
+
         self._s.add(transaction)
         self._s.flush()
         return transaction, True
