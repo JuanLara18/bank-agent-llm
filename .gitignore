@@ -53,5 +53,8 @@ htmlcov/
 # Power BI
 *.pbix
 
+# Bank statements (sensitive)
+*.pdf
+
 # OS
 Thumbs.db

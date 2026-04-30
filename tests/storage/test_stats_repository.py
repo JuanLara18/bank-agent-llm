@@ -266,6 +266,23 @@ def test_build_report_top_merchants_aggregates_by_name(session: Session) -> None
     assert by_m["Éxito"].total == Decimal("100")
 
 
+def test_build_report_top_merchants_normalizes_casing(session: Session) -> None:
+    """LLM variants like 'NEQUI' and 'Nequi' must group into one merchant."""
+    acc = _add_account(session, "BankA", "001")
+    _add_tx(session, acc, tx_date=date(2026, 1, 1), amount="20", direction="debit",
+            tags=["comida", "restaurante"], merchant="NEQUI",
+            description="TRANSF QR NEQUI AAA", pos=0)
+    _add_tx(session, acc, tx_date=date(2026, 1, 2), amount="30", direction="debit",
+            tags=["comida", "restaurante"], merchant="Nequi",
+            description="TRANSF QR NEQUI BBB", pos=1)
+
+    report = StatsRepository(session).build_report()
+    # Both should be grouped into a single merchant entry
+    assert len(report.top_merchants) == 1
+    assert report.top_merchants[0].total == Decimal("50")
+    assert report.top_merchants[0].count == 2
+
+
 def test_build_report_merchant_fallback_to_raw_description(session: Session) -> None:
     """When merchant_name is NULL, the raw description (truncated) is used."""
     acc = _add_account(session, "BankA", "001")
